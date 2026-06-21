@@ -1,0 +1,3953 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f172a" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Mein Tresor" />
+  <meta name="application-name" content="Mein Tresor" />
+  <meta name="description" content="Lokaler verschlüsselter Tresor für Notizen, Passwörter, Aufgaben und Kalender." />
+  <link rel="manifest" id="pwaManifest" />
+  <link rel="apple-touch-icon" id="appleIcon" />
+  <title>Mein Tresor</title>
+  <script>
+  // ── PWA BOOTSTRAP (läuft vor allem anderen) ──
+  (function() {
+    // 1. App-Icon als Canvas generieren (192×192 und 512×512)
+    function makeIconBlob(size) {
+      const c = document.createElement('canvas');
+      c.width = c.height = size;
+      const ctx = c.getContext('2d');
+      const r = size * 0.18;
+      // Hintergrund mit abgerundeten Ecken
+      ctx.beginPath();
+      ctx.moveTo(r, 0); ctx.lineTo(size-r, 0);
+      ctx.quadraticCurveTo(size, 0, size, r);
+      ctx.lineTo(size, size-r);
+      ctx.quadraticCurveTo(size, size, size-r, size);
+      ctx.lineTo(r, size); ctx.quadraticCurveTo(0, size, 0, size-r);
+      ctx.lineTo(0, r); ctx.quadraticCurveTo(0, 0, r, 0);
+      ctx.closePath();
+      const grad = ctx.createLinearGradient(0, 0, size, size);
+      grad.addColorStop(0, '#0f172a');
+      grad.addColorStop(1, '#1e3a8a');
+      ctx.fillStyle = grad;
+      ctx.fill();
+      // Blauer Kreis (Akzent)
+      ctx.beginPath();
+      ctx.arc(size*0.5, size*0.42, size*0.28, 0, Math.PI*2);
+      const g2 = ctx.createLinearGradient(size*0.22, size*0.14, size*0.78, size*0.7);
+      g2.addColorStop(0, '#3b82f6');
+      g2.addColorStop(1, '#06b6d4');
+      ctx.fillStyle = g2;
+      ctx.fill();
+      // Schloss-Symbol
+      const em = size / 192;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 8 * em;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      // Bügel
+      ctx.beginPath();
+      ctx.arc(size*0.5, size*0.38, size*0.13, Math.PI, 0);
+      ctx.stroke();
+      // Schloss-Körper
+      const bx = size*0.34, by = size*0.44, bw = size*0.32, bh = size*0.22, br = 8*em;
+      ctx.beginPath();
+      ctx.moveTo(bx+br, by); ctx.lineTo(bx+bw-br, by);
+      ctx.quadraticCurveTo(bx+bw, by, bx+bw, by+br);
+      ctx.lineTo(bx+bw, by+bh-br);
+      ctx.quadraticCurveTo(bx+bw, by+bh, bx+bw-br, by+bh);
+      ctx.lineTo(bx+br, by+bh); ctx.quadraticCurveTo(bx, by+bh, bx, by+bh-br);
+      ctx.lineTo(bx, by+br); ctx.quadraticCurveTo(bx, by, bx+br, by);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      ctx.fill();
+      ctx.stroke();
+      // Schlüsselloch
+      ctx.beginPath();
+      ctx.arc(size*0.5, size*0.52, size*0.048, 0, Math.PI*2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(size*0.47, size*0.555);
+      ctx.lineTo(size*0.53, size*0.555);
+      ctx.lineTo(size*0.515, size*0.61);
+      ctx.lineTo(size*0.485, size*0.61);
+      ctx.closePath();
+      ctx.fill();
+      // App-Name unten
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.font = `bold ${Math.round(size*0.095)}px -apple-system,sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('TRESOR', size*0.5, size*0.82);
+      return c.toDataURL('image/png');
+    }
+
+    // Icons erzeugen
+    const icon192 = makeIconBlob(192);
+    const icon512 = makeIconBlob(512);
+
+    // Apple Touch Icon setzen
+    document.getElementById('appleIcon').href = icon192;
+
+    // 2. Web App Manifest als Blob injizieren
+    const manifest = {
+      name: 'Mein Tresor',
+      short_name: 'Tresor',
+      description: 'Lokaler, verschlüsselter Tresor für Notizen, Passwörter, Aufgaben und Kalender.',
+      start_url: './',
+      display: 'standalone',
+      orientation: 'portrait-primary',
+      background_color: '#0f172a',
+      theme_color: '#0f172a',
+      lang: 'de',
+      categories: ['productivity', 'utilities'],
+      icons: [
+        { src: icon192, sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+        { src: icon512, sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
+      ],
+      screenshots: []
+    };
+    const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+    const manifestUrl = URL.createObjectURL(manifestBlob);
+    document.getElementById('pwaManifest').href = manifestUrl;
+
+    // 3. Service Worker als Blob registrieren (Offline-Support)
+    const swCode = `
+const CACHE = 'tresor-v1';
+// Beim Install: die App selbst cachen
+self.addEventListener('install', e => {
+  self.skipWaiting();
+  e.waitUntil(
+    caches.open(CACHE).then(cache =>
+      cache.addAll([self.location.pathname])
+    ).catch(() => {})
+  );
+});
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+    )
+  );
+  self.clients.claim();
+});
+// Network-first, Fallback auf Cache
+self.addEventListener('fetch', e => {
+  if (e.request.method !== 'GET') return;
+  e.respondWith(
+    fetch(e.request)
+      .then(res => {
+        if (res && res.status === 200) {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+        }
+        return res;
+      })
+      .catch(() => caches.match(e.request))
+  );
+});
+`;
+    if ('serviceWorker' in navigator) {
+      const swBlob = new Blob([swCode], { type: 'application/javascript' });
+      const swUrl = URL.createObjectURL(swBlob);
+      navigator.serviceWorker.register(swUrl, { scope: './' })
+        .then(reg => console.log('SW registriert:', reg.scope))
+        .catch(err => console.warn('SW Fehler:', err));
+    }
+
+    // 4. Install-Banner verwalten
+    window._pwaInstallPrompt = null;
+    window.addEventListener('beforeinstallprompt', e => {
+      e.preventDefault();
+      window._pwaInstallPrompt = e;
+      // Banner nach kurzem Delay anzeigen
+      setTimeout(() => {
+        const banner = document.getElementById('installBanner');
+        if (banner) banner.style.display = 'flex';
+      }, 2000);
+    });
+    window.addEventListener('appinstalled', () => {
+      const banner = document.getElementById('installBanner');
+      if (banner) banner.style.display = 'none';
+      window._pwaInstallPrompt = null;
+    });
+  })();
+  </script>
+  <style>
+    :root {
+      --bg: #f0f4f9;
+      --panel: #ffffff;
+      --panel-2: #f8fafd;
+      --text: #18202e;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --primary-light: #eff6ff;
+      --danger: #dc2626;
+      --danger-dark: #b91c1c;
+      --ok: #059669;
+      --ok-light: #ecfdf5;
+      --warn: #d97706;
+      --warn-light: #fffbeb;
+      --shadow-sm: 0 1px 3px rgba(15,23,42,0.07), 0 4px 12px rgba(15,23,42,0.05);
+      --shadow: 0 2px 8px rgba(15,23,42,0.08), 0 12px 32px rgba(15,23,42,0.06);
+      --radius: 16px;
+      --sidebar-w: 260px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: var(--sidebar-w) 1fr;
+      min-height: 100vh;
+    }
+
+    /* ── SIDEBAR ── */
+    .sidebar {
+      background: #0f172a;
+      color: #fff;
+      padding: 20px 14px 24px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 6px 6px 18px;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+      margin-bottom: 8px;
+    }
+
+    .logo {
+      width: 38px;
+      height: 38px;
+      border-radius: 11px;
+      background: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%);
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+      font-size: 15px;
+      flex-shrink: 0;
+      box-shadow: 0 6px 16px rgba(59,130,246,0.4);
+    }
+
+    .brand h1 {
+      font-size: 15px;
+      font-weight: 700;
+      margin: 0;
+      line-height: 1.25;
+      color: #f1f5f9;
+    }
+
+    .brand small {
+      color: #64748b;
+      display: block;
+      margin-top: 2px;
+      font-size: 11px;
+      font-weight: 400;
+    }
+
+    .nav {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      flex: 1;
+    }
+
+    .nav button {
+      width: 100%;
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      text-align: left;
+      cursor: pointer;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 13.5px;
+      font-weight: 500;
+      transition: background 0.13s, color 0.13s;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .nav button .nav-icon {
+      font-size: 16px;
+      width: 20px;
+      text-align: center;
+      flex-shrink: 0;
+      opacity: 0.75;
+    }
+
+    .nav button:hover {
+      background: rgba(255,255,255,0.07);
+      color: #e2e8f0;
+    }
+
+    .nav button.active {
+      background: rgba(59,130,246,0.18);
+      color: #93c5fd;
+      font-weight: 600;
+    }
+
+    .nav button.active .nav-icon { opacity: 1; }
+
+    .sidebar-card {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 12px;
+      padding: 12px 13px;
+      margin-top: 8px;
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .sidebar-card b { color: #94a3b8; }
+
+    /* ── MAIN ── */
+    .main {
+      padding: 24px 28px 40px;
+      max-width: 1400px;
+      width: 100%;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .topbar h2 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      color: var(--text);
+    }
+
+    .topbar p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      flex-shrink: 0;
+    }
+
+    button, input, textarea, select { font-family: inherit; }
+
+    /* ── BUTTONS ── */
+    .btn {
+      border: 0;
+      border-radius: 10px;
+      padding: 9px 14px;
+      cursor: pointer;
+      background: var(--primary);
+      color: #fff;
+      font-weight: 600;
+      font-size: 13.5px;
+      transition: background 0.13s, box-shadow 0.13s, transform 0.1s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      text-decoration: none;
+      white-space: nowrap;
+      letter-spacing: 0.01em;
+    }
+
+    .btn:hover {
+      background: var(--primary-dark);
+      box-shadow: 0 4px 12px rgba(37,99,235,0.3);
+    }
+
+    .btn:active { transform: scale(0.98); }
+    .btn.secondary { background: #e8f0fe; color: #1e40af; }
+    .btn.secondary:hover { background: #d6e4fd; box-shadow: none; }
+    .btn.ghost { background: #f1f5f9; color: #475569; border: 1px solid var(--line); }
+    .btn.ghost:hover { background: #e9eef5; box-shadow: none; }
+    .btn.danger { background: var(--danger); }
+    .btn.danger:hover { background: var(--danger-dark); box-shadow: 0 4px 12px rgba(220,38,38,0.3); }
+    .btn.ok { background: var(--ok); }
+    .btn.ok:hover { background: #047857; box-shadow: 0 4px 12px rgba(5,150,105,0.3); }
+    .btn.small { padding: 7px 10px; font-size: 12px; border-radius: 8px; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    /* ── CARDS ── */
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      padding: 20px;
+    }
+
+    .card h3 {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin: 0 0 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .wide-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    /* ── FIELDS ── */
+    .field { margin-bottom: 13px; }
+    .field label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      border: 1.5px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 10px;
+      padding: 10px 12px;
+      outline: none;
+      transition: border-color 0.13s, box-shadow 0.13s;
+      font-size: 14px;
+    }
+
+    textarea { min-height: 170px; resize: vertical; line-height: 1.55; }
+
+    input:focus, textarea:focus, select:focus {
+      border-color: #60a5fa;
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.14);
+    }
+
+    /* ── LIST ── */
+    .list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: calc(100vh - 280px);
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding-right: 2px;
+    }
+
+    .list::-webkit-scrollbar { width: 4px; }
+    .list::-webkit-scrollbar-track { background: transparent; }
+    .list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+
+    .item {
+      border: 1.5px solid var(--line);
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 13px 14px;
+      cursor: pointer;
+      transition: border-color 0.13s, background 0.13s, box-shadow 0.13s;
+    }
+
+    .item:hover {
+      border-color: #93c5fd;
+      background: #f8fbff;
+      box-shadow: 0 2px 8px rgba(37,99,235,0.07);
+    }
+
+    .item.active {
+      border-color: #3b82f6;
+      background: var(--primary-light);
+      box-shadow: 0 2px 8px rgba(37,99,235,0.12);
+    }
+
+    .item-title {
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: flex-start;
+    }
+
+    .item-meta, .hint, .muted {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .pill-row { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 7px; }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #3730a3;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .pill.green { background: var(--ok-light); color: #065f46; }
+    .pill.orange { background: #fff7ed; color: #9a3412; }
+    .pill.gray { background: #f1f5f9; color: #475569; }
+
+    .section { display: none; }
+    .section.active { display: block; }
+
+    /* ── UNLOCK SCREEN ── */
+    .unlock-wrap {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 60%, #0f172a 100%);
+    }
+
+    .unlock-card {
+      max-width: 480px;
+      width: 100%;
+      background: #fff;
+      border-radius: 20px;
+      box-shadow: 0 32px 80px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.08);
+      overflow: hidden;
+    }
+
+    .unlock-head {
+      background: linear-gradient(135deg, #0f172a, #1e40af);
+      color: #fff;
+      padding: 28px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .unlock-head .logo-big {
+      width: 48px;
+      height: 48px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #3b82f6, #06b6d4);
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+      font-size: 18px;
+      margin-bottom: 14px;
+      box-shadow: 0 8px 20px rgba(59,130,246,0.45);
+    }
+
+    .unlock-head h1 { margin: 0; font-size: 24px; font-weight: 700; }
+    .unlock-head p { margin: 8px 0 0; color: #93c5fd; font-size: 13.5px; line-height: 1.5; }
+    .unlock-body { padding: 24px; }
+
+    /* ── NOTICES ── */
+    .notice {
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      color: #92400e;
+      border-radius: 10px;
+      padding: 11px 13px;
+      font-size: 13px;
+      line-height: 1.5;
+      margin-bottom: 14px;
+    }
+
+    .success { background: var(--ok-light); border-color: #a7f3d0; color: #065f46; }
+    .danger-box { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+
+    /* ── GRIDS ── */
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .three { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .four { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; }
+
+    /* ── TOOLBAR ── */
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .toolbar .search {
+      min-width: 240px;
+      flex: 1;
+    }
+
+    .toolbar select { width: auto; min-width: 160px; }
+
+    /* ── PASSWORD LINE ── */
+    .password-line {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    /* ── STATS ── */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(130px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .stat {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px 18px;
+      box-shadow: var(--shadow-sm);
+      transition: box-shadow 0.13s;
+    }
+
+    .stat:hover { box-shadow: var(--shadow); }
+
+    .stat b {
+      display: block;
+      font-size: 26px;
+      font-weight: 800;
+      color: var(--primary);
+      margin-bottom: 3px;
+      letter-spacing: -0.02em;
+    }
+
+    .stat span { color: var(--muted); font-size: 12px; font-weight: 500; }
+
+    .footer-note { margin-top: 16px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+
+    .empty {
+      border: 1.5px dashed #cbd5e1;
+      border-radius: 12px;
+      padding: 28px 20px;
+      text-align: center;
+      color: var(--muted);
+      background: #f8fafc;
+      font-size: 13px;
+    }
+
+    .empty::before {
+      content: '📭';
+      display: block;
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+
+    /* ── TOAST ── */
+    .toast {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%) translateY(16px);
+      bottom: 28px;
+      background: #0f172a;
+      color: #fff;
+      padding: 11px 20px;
+      border-radius: 40px;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.28);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s, transform 0.2s;
+      z-index: 200;
+      max-width: 380px;
+      font-size: 13.5px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ── MODAL ── */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15,23,42,0.5);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 100;
+    }
+
+    .modal-backdrop.show { display: flex; }
+
+    .modal {
+      width: min(520px, 100%);
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.3);
+      border: 1px solid var(--line);
+      padding: 24px;
+    }
+
+    .modal h3 { margin: 0 0 10px; font-size: 16px; font-weight: 700; }
+    .modal p { color: var(--muted); font-size: 13.5px; line-height: 1.55; }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 20px; }
+
+    /* ── STRENGTH BAR ── */
+    .strength {
+      height: 6px;
+      background: #e2e8f0;
+      border-radius: 99px;
+      overflow: hidden;
+      margin-top: 7px;
+    }
+
+    .strength > div { height: 100%; width: 0%; background: var(--danger); transition: width 0.25s, background 0.25s; }
+
+    /* ── IMAGE DROP ── */
+    .image-drop {
+      border: 2px dashed #93c5fd;
+      background: #f8fbff;
+      border-radius: 12px;
+      padding: 18px 16px;
+      text-align: center;
+      color: #1e3a8a;
+      cursor: pointer;
+      transition: background 0.13s, border-color 0.13s;
+      font-size: 13px;
+    }
+    .image-drop:hover { background: #eff6ff; border-color: #60a5fa; }
+    .image-drop.drag { background: #dbeafe; border-color: var(--primary); }
+
+    .image-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .image-card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      background: #fff;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .image-card img {
+      width: 100%;
+      height: 100px;
+      object-fit: cover;
+      display: block;
+      background: #f1f5f9;
+    }
+
+    .file-thumb {
+      height: 100px;
+      display: grid;
+      place-items: center;
+      background: #fef2f2;
+      color: #dc2626;
+      font-weight: 900;
+      font-size: 20px;
+    }
+
+    .image-card .image-info { padding: 8px 10px; }
+    .image-card .image-name {
+      font-size: 11.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .image-card .image-actions { display: flex; gap: 5px; margin-top: 7px; }
+    .image-card .image-actions .btn { flex: 1; padding: 6px 4px; font-size: 11px; }
+
+    /* ── CATEGORIES ── */
+    .category-tree { display: flex; flex-direction: column; gap: 8px; }
+
+    .cat-box {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #f8fafc;
+      padding: 12px 14px;
+    }
+
+    .cat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .sub-list { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; }
+
+    .sub-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      background: #fff;
+      border: 1px solid var(--line);
+      padding: 7px 10px;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+
+    /* ── STORAGE BAR ── */
+    .storage-bar {
+      height: 8px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      overflow: hidden;
+      margin: 8px 0 6px;
+    }
+    .storage-bar > div { height: 100%; width: 0%; background: var(--primary); transition: width 0.3s; }
+
+    /* ── CALENDAR ── */
+    .calendar-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .calendar-title {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: 56px repeat(7, minmax(72px, 1fr));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+      background: var(--panel);
+    }
+
+    .cal-head, .cal-kw, .cal-day {
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      padding: 8px;
+    }
+
+    .calendar-grid > *:nth-child(8n) { border-right: 0; }
+
+    .cal-head {
+      background: #f8fafc;
+      font-weight: 700;
+      font-size: 11px;
+      text-align: center;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      min-height: auto;
+      padding: 8px 4px;
+    }
+
+    .cal-kw {
+      background: #f0f4ff;
+      color: #4338ca;
+      font-size: 11px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .cal-day {
+      min-height: 96px;
+      background: #fff;
+      cursor: pointer;
+      position: relative;
+      transition: background 0.12s;
+    }
+
+    .cal-day:hover { background: #f8fafc; }
+    .cal-day.other-month { background: #fafbfc; color: #94a3b8; }
+    .cal-day.today { outline: 2px solid rgba(37,99,235,.35); outline-offset: -2px; background: #f0f7ff; }
+    .cal-day.selected { background: var(--primary-light); }
+
+    .cal-num {
+      font-weight: 700;
+      font-size: 13px;
+      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .cal-event-chip {
+      display: block;
+      border-radius: 6px;
+      background: #dbeafe;
+      color: #1e40af;
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 2px 5px;
+      margin-top: 3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .cal-more { font-size: 10px; color: var(--primary); margin-top: 3px; font-weight: 600; }
+
+    .agenda-list { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 360px); overflow: auto; padding-right: 2px; }
+
+    .agenda-date {
+      font-weight: 700;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin: 6px 0 2px;
+    }
+
+    .agenda-item {
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      border-radius: 11px;
+      padding: 11px 13px;
+      cursor: pointer;
+      transition: border-color 0.13s, background 0.13s;
+    }
+
+    .agenda-item:hover { border-color: #93c5fd; background: #f0f7ff; }
+    .agenda-item.active { border-color: #3b82f6; background: var(--primary-light); }
+
+    /* ── TASKS ── */
+    .task-done {
+      opacity: .6;
+      text-decoration: line-through;
+    }
+
+    .task-late {
+      border-color: #fca5a5 !important;
+      background: #fff5f5 !important;
+    }
+
+    .task-source {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 900px) {
+      .calendar-grid { grid-template-columns: 38px repeat(7, minmax(34px, 1fr)); font-size: 12px; }
+      .cal-head, .cal-kw, .cal-day { padding: 5px; }
+      .cal-day { min-height: 76px; }
+      .cal-event-chip { display: none; }
+    }
+
+    @media (max-width: 1080px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { position: relative; height: auto; }
+      .grid, .wide-grid { grid-template-columns: 1fr; }
+      .stat-grid { grid-template-columns: repeat(2, 1fr); }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .actions { justify-content: flex-start; }
+      .list { max-height: none; }
+      .toolbar select { width: 100%; }
+    }
+
+    @media (max-width: 640px) {
+      .main { padding: 16px; }
+      .row, .three, .four, .stat-grid { grid-template-columns: 1fr; }
+      .password-line { grid-template-columns: 1fr; }
+      .topbar h2 { font-size: 20px; }
+      .toolbar .search { min-width: 100%; }
+    }
+
+
+
+    /* ── MOBILE OPTIMIERUNG ── */
+    .mobile-only { display: none; }
+    .btn, input, textarea, select { -webkit-tap-highlight-color: transparent; }
+    .list-item, .agenda-item, .cal-day, .btn, .nav button { touch-action: manipulation; }
+
+    @media (max-width: 760px) {
+      :root { --radius: 14px; }
+
+      body { background: #f0f4f9; -webkit-text-size-adjust: 100%; }
+
+      .app { display: block; min-height: 100vh; }
+
+      .sidebar {
+        position: fixed;
+        left: 0; right: 0; bottom: 0; top: auto;
+        height: auto;
+        max-height: 76px;
+        z-index: 80;
+        padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+        overflow: hidden;
+        border-radius: 20px 20px 0 0;
+        box-shadow: 0 -8px 28px rgba(15,23,42,.20);
+        flex-direction: row;
+        gap: 0;
+      }
+
+      .brand, .sidebar-card { display: none; }
+
+      .nav {
+        display: flex;
+        flex-direction: row;
+        gap: 4px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding: 2px 2px 2px;
+        flex: 1;
+      }
+      .nav::-webkit-scrollbar { display: none; }
+
+      .nav button {
+        width: auto;
+        flex: 0 0 auto;
+        min-width: 88px;
+        flex-direction: column;
+        text-align: center;
+        margin: 0;
+        padding: 6px 10px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+        gap: 2px;
+        background: rgba(255,255,255,.06);
+        color: #64748b;
+      }
+
+      .nav button .nav-icon { font-size: 19px; width: auto; }
+
+      .nav button.active {
+        background: rgba(59,130,246,.22);
+        color: #93c5fd;
+      }
+
+      .main {
+        padding: 14px 12px 100px;
+        max-width: 100%;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 40;
+        background: rgba(240,244,249,.96);
+        backdrop-filter: blur(12px);
+        margin: -14px -12px 14px;
+        padding: calc(12px + env(safe-area-inset-top)) 12px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .topbar h2 { font-size: 20px; }
+      .topbar p { font-size: 12px; }
+
+      .actions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .actions .btn { width: 100%; }
+
+      .card { padding: 14px; border-radius: 14px; box-shadow: var(--shadow-sm); }
+
+      .card h3 { font-size: 11px; }
+
+      .grid, .wide-grid, .row, .three, .four, .stat-grid, .password-line {
+        grid-template-columns: 1fr !important;
+        gap: 10px;
+      }
+
+      .stat-grid { margin-bottom: 12px; }
+      .stat { padding: 13px 15px; border-radius: 13px; }
+      .stat b { font-size: 22px; }
+
+      input, textarea, select {
+        font-size: 16px;
+        min-height: 44px;
+        border-radius: 11px;
+      }
+
+      textarea { min-height: 130px; }
+      .field { margin-bottom: 10px; }
+      .field label { font-size: 11px; }
+
+      .btn {
+        min-height: 44px;
+        padding: 11px 14px;
+        border-radius: 11px;
+        font-size: 14px;
+      }
+
+      .btn.small {
+        min-height: 38px;
+        padding: 8px 10px;
+        font-size: 12px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+      }
+
+      .toolbar .search, .toolbar select, .toolbar .btn {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .list {
+        max-height: none;
+        gap: 8px;
+      }
+
+      .item { padding: 12px 13px; border-radius: 12px; }
+      .item-title { font-size: 14px; }
+      .pill-row { gap: 4px; }
+      .pill { font-size: 10.5px; padding: 3px 7px; }
+
+      .image-drop { padding: 16px 12px; border-radius: 12px; }
+      .image-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .image-card img { height: 90px; }
+      .image-card .image-actions { display: grid; grid-template-columns: 1fr; }
+
+      .calendar-grid {
+        grid-template-columns: 30px repeat(7, minmax(30px, 1fr));
+        gap: 2px;
+        font-size: 11px;
+        border-radius: 12px;
+      }
+
+      .cal-head, .cal-kw, .cal-day { padding: 4px 3px; }
+      .cal-head { font-size: 9px; }
+      .cal-kw { font-size: 9px; }
+      .cal-day { min-height: 48px; }
+      .cal-num { font-size: 11px; margin-bottom: 0; }
+      .cal-event-chip { display: none; }
+      .cal-more { font-size: 10px; font-weight: 700; color: var(--primary); }
+
+      .agenda-list { max-height: none; padding-right: 0; }
+      .agenda-item { padding: 10px 12px; }
+
+      .modal-backdrop { align-items: flex-end; padding: 0 8px 8px; }
+      .modal {
+        width: 100%;
+        max-height: 90vh;
+        overflow-y: auto;
+        border-radius: 20px 20px 14px 14px;
+        padding: 20px;
+      }
+      .modal-actions { display: grid; grid-template-columns: 1fr; gap: 6px; }
+
+      .toast {
+        left: 12px;
+        right: 12px;
+        bottom: 90px;
+        max-width: none;
+        text-align: center;
+        transform: translateX(0) translateY(8px);
+        border-radius: 12px;
+        white-space: normal;
+      }
+      .toast.show { transform: translateX(0) translateY(0); }
+
+      .unlock-wrap { padding: 16px; background: linear-gradient(150deg, #0f172a, #1e3a8a); }
+      .unlock-card { max-width: none; margin-top: 16px; border-radius: 18px; }
+      .unlock-head { padding: 20px; }
+      .unlock-head h1 { font-size: 21px; }
+      .unlock-body { padding: 18px; }
+    }
+
+    @media (max-width: 390px) {
+      .nav button { min-width: 78px; font-size: 10.5px; padding-left: 7px; padding-right: 7px; }
+      .main { padding-left: 10px; padding-right: 10px; }
+      .image-grid { grid-template-columns: 1fr; }
+      .calendar-grid { grid-template-columns: 26px repeat(7, minmax(26px, 1fr)); gap: 2px; }
+      .cal-day { min-height: 42px; }
+    }
+
+    @media print {
+      .sidebar, .actions, .toolbar, .btn, .modal-backdrop, .toast, input[type=file] { display: none !important; }
+      .app { display: block; }
+      .main { max-width: none; padding: 0; }
+      .card, .stat { box-shadow: none; }
+    }
+
+    /* ── PWA INSTALL BANNER ── */
+    #installBanner {
+      display: none;
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      z-index: 200;
+      background: #0f172a;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 -8px 32px rgba(0,0,0,0.4);
+    }
+
+    #installBanner .ib-icon {
+      width: 48px; height: 48px;
+      border-radius: 12px;
+      flex-shrink: 0;
+    }
+
+    #installBanner .ib-text {
+      flex: 1;
+      color: #f1f5f9;
+    }
+
+    #installBanner .ib-text strong {
+      display: block;
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+
+    #installBanner .ib-text span {
+      font-size: 12px;
+      color: #94a3b8;
+      line-height: 1.4;
+    }
+
+    #installBanner .ib-actions {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    #installDismiss {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #94a3b8;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    #installNow {
+      background: #2563eb;
+      border: 0;
+      color: #fff;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    @media (max-width: 760px) {
+      #installBanner { bottom: 76px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="locked" class="unlock-wrap">
+    <div class="unlock-card">
+      <div class="unlock-head">
+        <div class="logo-big">🔐</div>
+        <h1>Notizen & Passwort Tool</h1>
+        <p>Lokaler, verschlüsselter Tresor für Notizen, Passwörter, Aufgaben und Kalender.</p>
+      </div>
+      <div class="unlock-body">
+        <div id="firstUseInfo" class="notice">
+          Beim ersten Start legst du ein Master-Passwort fest. Merke es dir gut: Ohne Master-Passwort können die Daten nicht wiederhergestellt werden.
+        </div>
+        <div class="field">
+          <label for="masterPassword">Master-Passwort</label>
+          <input id="masterPassword" type="password" autocomplete="current-password" placeholder="Master-Passwort eingeben" />
+          <div class="strength"><div id="masterStrength"></div></div>
+          <div id="masterStrengthText" class="hint">Empfehlung: mindestens 12 Zeichen mit Zahlen und Sonderzeichen.</div>
+        </div>
+        <div id="confirmWrap" class="field">
+          <label for="masterConfirm">Master-Passwort wiederholen</label>
+          <input id="masterConfirm" type="password" autocomplete="new-password" placeholder="Master-Passwort wiederholen" />
+        </div>
+        <button id="unlockBtn" class="btn" style="width:100%;">Tresor öffnen</button>
+        <div class="footer-note">
+          Hinweis: Bilder und PDFs werden mit in deinem verschlüsselten Tresor gespeichert. Bei sehr vielen oder sehr großen Dateien kann der Browser-Speicher voll werden. Exportiere regelmäßig ein Backup.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="app" class="app" style="display:none;">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">NP</div>
+        <div>
+          <h1>Notizen & Passwörter</h1>
+          <small>Rev07 Mobile · Notizen · Aufgaben · Kalender · KW</small>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="active" data-section="dashboard"><span class="nav-icon">📊</span>Übersicht</button>
+        <button data-section="notes"><span class="nav-icon">📝</span>Notizen</button>
+        <button data-section="tasks"><span class="nav-icon">✅</span>Aufgaben</button>
+        <button data-section="passwords"><span class="nav-icon">🔑</span>Passwörter</button>
+        <button data-section="calendar"><span class="nav-icon">📅</span>Kalender</button>
+        <button data-section="categories"><span class="nav-icon">🏷️</span>Kategorien</button>
+        <button data-section="settings"><span class="nav-icon">⚙️</span>Einstellungen</button>
+      </nav>
+      <div class="sidebar-card">
+        <b>Status</b><br />
+        Tresor ist geöffnet. Änderungen werden automatisch verschlüsselt gespeichert.
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <h2 id="pageTitle">Übersicht</h2>
+          <p id="pageSub">Überblick über alle gespeicherten Notizen, Aufgaben, Passwörter und Kalendereinträge.</p>
+        </div>
+        <div class="actions">
+          <button id="exportBtnTop" class="btn secondary">Export</button>
+          <button id="lockBtn" class="btn ghost">Sperren</button>
+        </div>
+      </div>
+
+      <section id="dashboard" class="section active">
+        <div class="stat-grid">
+          <div class="stat"><b id="statNotes">0</b><span>Notizen</span></div>
+          <div class="stat"><b id="statTasks">0</b><span>Aufgaben</span></div>
+          <div class="stat"><b id="statPasswords">0</b><span>Passwörter</span></div>
+          <div class="stat"><b id="statEvents">0</b><span>Kalender-Termine</span></div>
+          <div class="stat"><b id="statCurrentWeek">KW -</b><span>Aktuelle Kalenderwoche</span></div>
+          <div class="stat"><b id="statCategories">0</b><span>Kategorien</span></div>
+          <div class="stat"><b id="statImages">0</b><span>Anhänge</span></div>
+        </div>
+        <div class="wide-grid">
+          <div class="card">
+            <h3 style="margin-top:0;">Schnellstart</h3>
+            <p class="muted">Du kannst zuerst Kategorien anlegen, dann Notizen oder Passwort-Einträge einer Hauptkategorie und Unterkategorie zuordnen.</p>
+            <div class="actions" style="justify-content:flex-start;margin-top:14px;">
+              <button class="btn" onclick="showSection('notes')">Neue Notiz</button>
+              <button class="btn secondary" onclick="showSection('passwords')">Neues Passwort</button>
+              <button class="btn ghost" onclick="showSection('tasks')">Aufgaben öffnen</button>
+              <button class="btn ghost" onclick="showSection('calendar')">Kalender öffnen</button>
+              <button class="btn ghost" onclick="showSection('categories')">Kategorien verwalten</button>
+            </div>
+            <div class="notice" style="margin-top:18px;">
+              Für viele kritische Zugangsdaten ist ein professioneller Passwortmanager weiterhin sicherer. Dieses Tool ist als lokales eigenes Werkzeug gedacht.
+            </div>
+          </div>
+          <div class="card">
+            <h3 style="margin-top:0;">Speicher</h3>
+            <div class="muted">Geschätzte Größe des verschlüsselten Tresors im Browser:</div>
+            <div class="storage-bar"><div id="storageFill"></div></div>
+            <div id="storageText" class="hint">-</div>
+            <p class="footer-note">Viele Anhänge erhöhen die Größe stark. Bilder werden automatisch auf ca. 1400 px Breite/Höhe verkleinert; PDFs bei Notizen bleiben unverändert.</p>
+            <div class="muted" style="margin-top:12px;">Letzte Änderung: <b id="statUpdated">-</b></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="notes" class="section">
+        <div class="toolbar">
+          <input id="noteSearch" class="search" placeholder="Notizen suchen..." />
+          <select id="noteFilterCategory"></select>
+          <select id="noteFilterSubcategory"></select>
+          <button id="newNoteBtn" class="btn">+ Neue Notiz</button>
+        </div>
+        <div class="grid">
+          <div class="card">
+            <h3 style="margin-top:0;">Notizenliste</h3>
+            <div id="notesList" class="list"></div>
+          </div>
+          <div class="card">
+            <h3 id="noteFormTitle" style="margin-top:0;">Neue Notiz</h3>
+            <input id="noteId" type="hidden" />
+            <div class="field">
+              <label for="noteTitle">Titel</label>
+              <input id="noteTitle" placeholder="z. B. Kunde, Projekt, Idee..." />
+            </div>
+            <div class="row">
+              <div class="field">
+                <label for="noteCategory">Kategorie</label>
+                <select id="noteCategory"></select>
+              </div>
+              <div class="field">
+                <label for="noteSubcategory">Unterkategorie</label>
+                <select id="noteSubcategory"></select>
+              </div>
+            </div>
+            <div class="field">
+              <label for="noteText">Notiz</label>
+              <textarea id="noteText" placeholder="Deine Notiz..." spellcheck="true"></textarea>
+            </div>
+            <div class="field">
+              <label>Anhänge zur Notiz</label>
+              <div id="imageDrop" class="image-drop">
+                Bilder oder PDFs hier ablegen oder klicken zum Auswählen
+                <div class="hint" style="margin-top:5px;">JPG, PNG, WebP, GIF und PDF. Bilder werden automatisch verkleinert, PDFs bleiben unverändert.</div>
+              </div>
+              <input id="noteImagesInput" type="file" accept="image/*,application/pdf,.pdf" multiple style="display:none;" />
+              <div id="noteImagesPreview" class="image-grid"></div>
+            </div>
+            <div class="actions" style="justify-content:flex-start;">
+              <button id="saveNoteBtn" class="btn ok">Speichern</button>
+              <button id="noteToTaskBtn" class="btn secondary">Aus Notiz Aufgabe machen</button>
+              <button id="clearNoteBtn" class="btn ghost">Leeren</button>
+              <button id="deleteNoteBtn" class="btn danger">Löschen</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tasks" class="section">
+        <div class="toolbar">
+          <input id="taskSearch" class="search" placeholder="Aufgaben suchen..." />
+          <select id="taskFilterCategory"></select>
+          <select id="taskFilterSubcategory"></select>
+          <select id="taskStatusFilter">
+            <option value="all">Alle Aufgaben</option>
+            <option value="open">Offen</option>
+            <option value="done">Erledigt</option>
+            <option value="overdue">Überfällig</option>
+          </select>
+          <button id="newTaskBtn" class="btn">+ Neue Aufgabe</button>
+        </div>
+        <div class="grid">
+          <div class="card">
+            <h3 style="margin-top:0;">Aufgabenliste</h3>
+            <div id="tasksList" class="list"></div>
+          </div>
+          <div class="card">
+            <h3 id="taskFormTitle" style="margin-top:0;">Neue Aufgabe</h3>
+            <input id="taskId" type="hidden" />
+            <input id="taskSourceNoteId" type="hidden" />
+            <div class="field">
+              <label for="taskTitle">Titel</label>
+              <input id="taskTitle" placeholder="z. B. Kunde anrufen, Dokument prüfen..." />
+            </div>
+            <div class="row">
+              <div class="field">
+                <label for="taskDueDate">Fällig am</label>
+                <input id="taskDueDate" type="date" />
+                <div id="taskDueKw" class="hint">KW -</div>
+              </div>
+              <div class="field">
+                <label for="taskPriority">Priorität</label>
+                <select id="taskPriority">
+                  <option value="normal">Normal</option>
+                  <option value="high">Hoch</option>
+                  <option value="low">Niedrig</option>
+                </select>
+              </div>
+            </div>
+            <div class="row">
+              <div class="field">
+                <label for="taskCategory">Kategorie</label>
+                <select id="taskCategory"></select>
+              </div>
+              <div class="field">
+                <label for="taskSubcategory">Unterkategorie</label>
+                <select id="taskSubcategory"></select>
+              </div>
+            </div>
+            <div class="field">
+              <label for="taskStatus">Status</label>
+              <select id="taskStatus">
+                <option value="open">Offen</option>
+                <option value="done">Erledigt</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="taskDetails">Details</label>
+              <textarea id="taskDetails" placeholder="Beschreibung, nächste Schritte, Notizinhalt..." style="min-height:120px;"></textarea>
+            </div>
+            <div id="taskSourceInfo" class="task-source" style="display:none;"></div>
+            <div class="field">
+              <label>Anhänge (Bilder & PDFs)</label>
+              <div id="taskAttachmentDrop" class="image-drop">
+                📎 Bilder oder PDFs hier ablegen oder klicken
+                <div class="hint" style="margin-top:4px;">JPG, PNG, WebP, GIF und PDF. Bilder werden automatisch verkleinert.</div>
+              </div>
+              <input id="taskAttachmentsInput" type="file" accept="image/*,application/pdf,.pdf" multiple style="display:none;" />
+              <div id="taskAttachmentsPreview" class="image-grid"></div>
+            </div>
+            <div class="actions" style="justify-content:flex-start; margin-top:14px;">
+              <button id="saveTaskBtn" class="btn ok">Speichern</button>
+              <button id="toggleTaskDoneBtn" class="btn secondary">Erledigt markieren</button>
+              <button id="clearTaskBtn" class="btn ghost">Leeren</button>
+              <button id="deleteTaskBtn" class="btn danger">Löschen</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="passwords" class="section">
+        <div class="toolbar">
+          <input id="passwordSearch" class="search" placeholder="Passwörter suchen..." />
+          <select id="passwordFilterCategory"></select>
+          <select id="passwordFilterSubcategory"></select>
+          <button id="newPasswordBtn" class="btn">+ Neuer Passwort-Eintrag</button>
+        </div>
+        <div class="grid">
+          <div class="card">
+            <h3 style="margin-top:0;">Passwortliste</h3>
+            <div id="passwordsList" class="list"></div>
+          </div>
+          <div class="card">
+            <h3 id="passwordFormTitle" style="margin-top:0;">Neuer Passwort-Eintrag</h3>
+            <input id="passwordId" type="hidden" />
+            <div class="field">
+              <label for="pwTitle">Name / Dienst</label>
+              <input id="pwTitle" placeholder="z. B. Gmail, Amazon, SAP..." />
+            </div>
+            <div class="field">
+              <label for="pwUrl">Webseite</label>
+              <input id="pwUrl" placeholder="https://..." />
+            </div>
+            <div class="row">
+              <div class="field">
+                <label for="pwUsername">Benutzername / E-Mail</label>
+                <input id="pwUsername" placeholder="Benutzername oder E-Mail" />
+              </div>
+              <div class="field">
+                <label for="pwCategory">Kategorie</label>
+                <select id="pwCategory"></select>
+              </div>
+            </div>
+            <div class="row">
+              <div class="field">
+                <label for="pwSubcategory">Unterkategorie</label>
+                <select id="pwSubcategory"></select>
+              </div>
+              <div class="field">
+                <label for="pwTags">Tags / Zusatzinfo</label>
+                <input id="pwTags" placeholder="z. B. 2FA, privat, wichtig" />
+              </div>
+            </div>
+            <div class="field">
+              <label for="pwPassword">Passwort</label>
+              <div class="password-line">
+                <input id="pwPassword" type="password" placeholder="Passwort" />
+                <button id="togglePwBtn" class="btn ghost small">Anzeigen</button>
+                <button id="copyPwBtn" class="btn secondary small">Kopieren</button>
+              </div>
+              <div class="strength"><div id="pwStrength"></div></div>
+              <div id="pwStrengthText" class="hint">Passwortstärke</div>
+            </div>
+            <div class="card" style="background:#f8fafc; box-shadow:none; margin-bottom:14px;">
+              <h4 style="margin:0 0 10px;">Passwort generieren</h4>
+              <div class="three">
+                <div class="field">
+                  <label for="genLength">Länge</label>
+                  <input id="genLength" type="number" min="8" max="64" value="18" />
+                </div>
+                <div class="field">
+                  <label for="genMode">Typ</label>
+                  <select id="genMode">
+                    <option value="all">Buchstaben, Zahlen, Sonderzeichen</option>
+                    <option value="easy">Einfach lesbar</option>
+                    <option value="pin">Nur Zahlen</option>
+                  </select>
+                </div>
+                <div class="field" style="display:flex; align-items:end;">
+                  <button id="generatePwBtn" class="btn secondary" style="width:100%;">Generieren</button>
+                </div>
+              </div>
+            </div>
+            <div class="field">
+              <label for="pwNotes">Notizen zum Passwort</label>
+              <textarea id="pwNotes" placeholder="z. B. 2FA, Sicherheitsfrage, Ablaufdatum..." style="min-height:90px;"></textarea>
+            </div>
+            <div class="field">
+              <label>Bilder zum Passwort</label>
+              <div id="passwordAttachmentDrop" class="image-drop">
+                Bilder hier ablegen oder klicken zum Auswählen
+                <div class="hint" style="margin-top:5px;">JPG, PNG, WebP und GIF. Bilder werden automatisch verkleinert und verschlüsselt gespeichert.</div>
+              </div>
+              <input id="passwordAttachmentsInput" type="file" accept="image/*" multiple style="display:none;" />
+              <div id="passwordAttachmentsPreview" class="image-grid"></div>
+            </div>
+            <div class="actions" style="justify-content:flex-start;">
+              <button id="savePasswordBtn" class="btn ok">Speichern</button>
+              <button id="clearPasswordBtn" class="btn ghost">Leeren</button>
+              <button id="deletePasswordBtn" class="btn danger">Löschen</button>
+              <button id="openUrlBtn" class="btn secondary">Webseite öffnen</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+      <section id="calendar" class="section">
+        <div class="toolbar">
+          <input id="calendarSearch" class="search" placeholder="Termine suchen..." />
+          <select id="calendarFilterCategory"></select>
+          <select id="calendarFilterSubcategory"></select>
+          <button id="newCalendarEventBtn" class="btn">+ Neuer Termin</button>
+        </div>
+        <div class="wide-grid">
+          <div class="card">
+            <div class="calendar-header">
+              <div>
+                <div id="calendarTitle" class="calendar-title">Kalender</div>
+                <div id="calendarWeekInfo" class="hint">KW</div>
+              </div>
+              <div class="actions">
+                <button id="prevMonthBtn" class="btn ghost small">← Monat</button>
+                <button id="todayBtn" class="btn secondary small">Heute</button>
+                <button id="nextMonthBtn" class="btn ghost small">Monat →</button>
+              </div>
+            </div>
+            <div id="calendarGrid" class="calendar-grid"></div>
+          </div>
+          <div class="card">
+            <h3 id="calendarFormTitle" style="margin-top:0;">Neuer Termin</h3>
+            <input id="calendarEventId" type="hidden" />
+            <div class="row">
+              <div class="field">
+                <label for="calendarDate">Datum</label>
+                <input id="calendarDate" type="date" />
+                <div id="calendarDateKw" class="hint">KW -</div>
+              </div>
+              <div class="field">
+                <label for="calendarTime">Uhrzeit</label>
+                <input id="calendarTime" type="time" />
+              </div>
+            </div>
+            <div class="field">
+              <label for="calendarTitleInput">Titel</label>
+              <input id="calendarTitleInput" placeholder="z. B. Termin, Frist, Geburtstag, Aufgabe..." />
+            </div>
+            <div class="row">
+              <div class="field">
+                <label for="calendarCategory">Kategorie</label>
+                <select id="calendarCategory"></select>
+              </div>
+              <div class="field">
+                <label for="calendarSubcategory">Unterkategorie</label>
+                <select id="calendarSubcategory"></select>
+              </div>
+            </div>
+            <!-- Als Aufgabe -->
+            <div class="field">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:13px;font-weight:600;color:var(--text);">
+                <input type="checkbox" id="calendarAsTask" style="width:auto;min-height:auto;border-radius:4px;accent-color:var(--primary);" />
+                Auch als Aufgabe anlegen
+              </label>
+            </div>
+            <div id="calendarTaskOptions" style="display:none;">
+              <div class="row">
+                <div class="field">
+                  <label for="calendarTaskPriority">Aufgaben-Priorität</label>
+                  <select id="calendarTaskPriority">
+                    <option value="normal">Normal</option>
+                    <option value="high">Hoch</option>
+                    <option value="low">Niedrig</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="calendarTaskStatus">Status</label>
+                  <select id="calendarTaskStatus">
+                    <option value="open">Offen</option>
+                    <option value="done">Erledigt</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="field">
+              <label for="calendarNotes">Notiz zum Termin</label>
+              <textarea id="calendarNotes" placeholder="Details, Adresse, To-do, Erinnerung..." style="min-height:90px;"></textarea>
+            </div>
+            <!-- Anhänge -->
+            <div class="field">
+              <label>Anhänge (Bilder & PDFs)</label>
+              <div id="calendarAttachmentDrop" class="image-drop">
+                📎 Bilder oder PDFs hier ablegen oder klicken
+                <div class="hint" style="margin-top:4px;">JPG, PNG, WebP, GIF und PDF. Bilder werden automatisch verkleinert.</div>
+              </div>
+              <input id="calendarAttachmentsInput" type="file" accept="image/*,application/pdf,.pdf" multiple style="display:none;" />
+              <div id="calendarAttachmentsPreview" class="image-grid"></div>
+            </div>
+            <div class="actions" style="justify-content:flex-start;">
+              <button id="saveCalendarEventBtn" class="btn ok">Speichern</button>
+              <button id="calendarEventToTaskBtn" class="btn secondary">→ Als Aufgabe</button>
+              <button id="clearCalendarEventBtn" class="btn ghost">Leeren</button>
+              <button id="deleteCalendarEventBtn" class="btn danger">Löschen</button>
+            </div>
+            <hr style="border:0;border-top:1px solid var(--line);margin:20px 0;" />
+            <h3 style="margin-top:0;">Termine</h3>
+            <div id="agendaList" class="agenda-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="categories" class="section">
+        <div class="wide-grid">
+          <div class="card">
+            <h3 style="margin-top:0;">Kategorie anlegen</h3>
+            <div class="field">
+              <label for="newCategoryName">Neue Hauptkategorie</label>
+              <input id="newCategoryName" placeholder="z. B. Arbeit, Privat, Immobilien" />
+            </div>
+            <button id="addCategoryBtn" class="btn ok">Kategorie hinzufügen</button>
+            <hr style="border:0;border-top:1px solid var(--line);margin:20px 0;" />
+            <h3>Unterkategorie anlegen</h3>
+            <div class="field">
+              <label for="parentCategorySelect">Hauptkategorie</label>
+              <select id="parentCategorySelect"></select>
+            </div>
+            <div class="field">
+              <label for="newSubcategoryName">Neue Unterkategorie</label>
+              <input id="newSubcategoryName" placeholder="z. B. Kunde A, Projekt B, Banken" />
+            </div>
+            <button id="addSubcategoryBtn" class="btn secondary">Unterkategorie hinzufügen</button>
+            <div class="notice" style="margin-top:18px;">
+              Löschen einer Kategorie entfernt nicht deine Notizen oder Passwörter. Die Einträge werden nur auf „ohne Kategorie“ gesetzt.
+            </div>
+          </div>
+          <div class="card">
+            <h3 style="margin-top:0;">Kategorienliste</h3>
+            <div id="categoryTree" class="category-tree"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="settings" class="section">
+        <div class="grid">
+          <div class="card">
+            <h3 style="margin-top:0;">☁️ GitHub Sync</h3>
+            <p class="muted">Synchronisiere deine verschlüsselten Daten automatisch zwischen PC und Handy über GitHub. Die Daten bleiben verschlüsselt – GitHub sieht nur unlesbaren Code.</p>
+            <div class="field">
+              <label for="ghToken">GitHub Personal Access Token</label>
+              <input id="ghToken" type="password" placeholder="ghp_..." autocomplete="off" />
+              <div class="hint">Einmalig eingeben – wird nur lokal gespeichert. Nie an andere weitergeben!</div>
+            </div>
+            <div class="field">
+              <label for="ghRepo">Repository (Benutzer/Repo)</label>
+              <input id="ghRepo" placeholder="z. B. 23041986/mein-tresor" autocomplete="off" />
+            </div>
+            <div class="actions" style="justify-content:flex-start; margin-bottom:8px; flex-wrap:wrap;">
+              <button id="ghSaveSettingsBtn" class="btn ok">Einstellungen speichern</button>
+              <button id="ghUploadBtn" class="btn">⬆ Jetzt hochladen</button>
+              <button id="ghDownloadBtn" class="btn secondary">⬇ Jetzt herunterladen</button>
+            </div>
+            <div id="ghStatus" class="notice" style="display:none;"></div>
+            <div class="notice" style="margin-top:10px;">
+              <b>So funktioniert es:</b> Nach dem Speichern werden Daten bei jeder Änderung automatisch zu GitHub hochgeladen. Beim Öffnen auf einem anderen Gerät einfach „Jetzt herunterladen" klicken.
+            </div>
+          </div>
+          <div class="card">
+            <h3 style="margin-top:0;">Backup</h3>
+            <p class="muted">Exportiere deine verschlüsselten Daten als JSON-Datei. Bilder und PDFs sind im Backup enthalten.</p>
+            <div class="actions" style="justify-content:flex-start; margin-bottom:14px;">
+              <button id="exportBtn" class="btn">Verschlüsseltes Backup exportieren</button>
+              <label class="btn secondary" for="importFile" style="cursor:pointer;">Backup importieren</label>
+              <input id="importFile" type="file" accept="application/json,.json" style="display:none;" />
+            </div>
+            <div class="notice">Beim Import wird der aktuelle lokale Tresor überschrieben. Exportiere vorher ein Backup, falls du unsicher bist.</div>
+          </div>
+          <div class="card">
+            <h3 style="margin-top:0;">Master-Passwort ändern</h3>
+            <div class="field">
+              <label for="newMaster1">Neues Master-Passwort</label>
+              <input id="newMaster1" type="password" autocomplete="new-password" />
+            </div>
+            <div class="field">
+              <label for="newMaster2">Neues Master-Passwort wiederholen</label>
+              <input id="newMaster2" type="password" autocomplete="new-password" />
+            </div>
+            <button id="changeMasterBtn" class="btn ok">Master-Passwort ändern</button>
+            <hr style="border:0;border-top:1px solid var(--line);margin:20px 0;" />
+            <h3>Gefahrenzone</h3>
+            <p class="muted">Damit werden alle lokal gespeicherten Daten in diesem Browser gelöscht.</p>
+            <button id="wipeBtn" class="btn danger">Alles löschen</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="modalBackdrop" class="modal-backdrop">
+    <div class="modal">
+      <h3 id="modalTitle">Bestätigung</h3>
+      <p id="modalText" class="muted"></p>
+      <div class="modal-actions">
+        <button id="modalCancel" class="btn ghost">Abbrechen</button>
+        <button id="modalOk" class="btn danger">Bestätigen</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const STORAGE_KEY = 'np_tool_encrypted_vault_rev01';
+    const ITERATIONS = 250000;
+    const MAX_IMAGE_SIDE = 1400;
+    const MAX_PDF_SIZE = 12 * 1024 * 1024;
+    const JPEG_QUALITY = 0.82;
+    const SOFT_STORAGE_LIMIT_BYTES = 4.5 * 1024 * 1024;
+
+    let vault = emptyVault();
+    let cryptoKey = null;
+    let currentSalt = null;
+    let currentIterations = ITERATIONS;
+    let unlockedPassword = null;
+    let activeSection = 'dashboard';
+    let noteDraftImages = [];
+    let passwordDraftImages = [];
+    let calendarDraftImages = [];
+    let taskDraftImages = [];
+    let calendarCursor = new Date();
+    let selectedCalendarDate = dateKey(new Date());
+
+    const $ = (id) => document.getElementById(id);
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+
+    function emptyVault() {
+      return { version: 6, notes: [], tasks: [], passwords: [], calendarEvents: [], categories: [], updatedAt: null, createdAt: null };
+    }
+
+    function uid() {
+      return crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2);
+    }
+
+    function nowIso() { return new Date().toISOString(); }
+
+    function fmtDate(iso) {
+      if (!iso) return '-';
+      try { return new Date(iso).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }); }
+      catch { return '-'; }
+    }
+
+    function toB64(bytes) {
+      let binary = '';
+      const arr = new Uint8Array(bytes);
+      for (let i = 0; i < arr.length; i++) binary += String.fromCharCode(arr[i]);
+      return btoa(binary);
+    }
+
+    function fromB64(b64) {
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+    }
+
+    async function deriveKey(password, salt, iterations = ITERATIONS) {
+      const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveKey']);
+      return crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+      );
+    }
+
+    async function encryptVault() {
+      if (!cryptoKey) return;
+      vault.version = 6;
+      vault.updatedAt = nowIso();
+      if (!vault.createdAt) vault.createdAt = vault.updatedAt;
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const plaintext = enc.encode(JSON.stringify(vault));
+      const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, cryptoKey, plaintext);
+      const payload = {
+        version: 6,
+        kdf: 'PBKDF2',
+        iterations: currentIterations || ITERATIONS,
+        salt: toB64(currentSalt),
+        iv: toB64(iv),
+        ciphertext: toB64(ciphertext)
+      };
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      } catch (err) {
+        console.error(err);
+        toast('Speicher voll. Bitte Bilder reduzieren oder Backup exportieren. Die letzte Änderung wurde eventuell nicht gespeichert.');
+        return;
+      }
+      renderAll();
+    }
+
+    async function decryptVault(payload, password) {
+      currentIterations = payload.iterations || ITERATIONS;
+      currentSalt = fromB64(payload.salt);
+      cryptoKey = await deriveKey(password, currentSalt, currentIterations);
+      const plaintext = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: fromB64(payload.iv) },
+        cryptoKey,
+        fromB64(payload.ciphertext)
+      );
+      return JSON.parse(dec.decode(plaintext));
+    }
+
+    function initLockScreen() {
+      const hasVault = !!localStorage.getItem(STORAGE_KEY);
+      $('firstUseInfo').style.display = hasVault ? 'none' : 'block';
+      $('confirmWrap').style.display = hasVault ? 'none' : 'block';
+      $('unlockBtn').textContent = hasVault ? 'Tresor öffnen' : 'Tresor erstellen';
+    }
+
+    async function openVault() {
+      const password = $('masterPassword').value;
+      if (!password || password.length < 8) return toast('Bitte ein Master-Passwort mit mindestens 8 Zeichen eingeben.');
+      const raw = localStorage.getItem(STORAGE_KEY);
+      try {
+        if (raw) {
+          const payload = JSON.parse(raw);
+          if (!payload.salt || !payload.iv || !payload.ciphertext) throw new Error('Ungültiger Tresor.');
+          vault = normalizeVault(await decryptVault(payload, password));
+          unlockedPassword = password;
+          await encryptVault();
+          showApp();
+          toast('Tresor geöffnet.');
+        } else {
+          const confirm = $('masterConfirm').value;
+          if (password !== confirm) return toast('Die Master-Passwörter stimmen nicht überein.');
+          currentSalt = crypto.getRandomValues(new Uint8Array(16));
+          currentIterations = ITERATIONS;
+          cryptoKey = await deriveKey(password, currentSalt, currentIterations);
+          vault = emptyVault();
+          vault.createdAt = nowIso();
+          vault.updatedAt = vault.createdAt;
+          unlockedPassword = password;
+          createDefaultCategories();
+          await encryptVault();
+          showApp();
+          toast('Tresor erstellt.');
+        }
+      } catch (err) {
+        console.error(err);
+        cryptoKey = null;
+        toast('Master-Passwort falsch oder Tresor beschädigt.');
+      }
+    }
+
+    function normalizeVault(v) {
+      const out = {
+        version: 6,
+        notes: Array.isArray(v.notes) ? v.notes : [],
+        tasks: Array.isArray(v.tasks) ? v.tasks : [],
+        passwords: Array.isArray(v.passwords) ? v.passwords : [],
+        calendarEvents: Array.isArray(v.calendarEvents) ? v.calendarEvents : [],
+        categories: Array.isArray(v.categories) ? v.categories : [],
+        createdAt: v.createdAt || nowIso(),
+        updatedAt: v.updatedAt || null
+      };
+      out.categories = out.categories.map(c => ({ id: c.id || uid(), name: c.name || 'Ohne Name', parentId: c.parentId || null }));
+      if (!out.categories.length) createDefaultCategories(out);
+
+      function migrateCategoryString(item) {
+        if (item.category && !item.categoryId) {
+          const cat = getOrCreateCategoryByName(item.category, null, out);
+          item.categoryId = cat.id;
+        }
+        delete item.category;
+      }
+
+      out.notes = out.notes.map(n => {
+        const item = {
+          id: n.id || uid(),
+          title: n.title || '',
+          text: n.text || '',
+          categoryId: n.categoryId || '',
+          subcategoryId: n.subcategoryId || '',
+          images: Array.isArray(n.images) ? n.images : [],
+          createdAt: n.createdAt || nowIso(),
+          updatedAt: n.updatedAt || n.createdAt || nowIso()
+        };
+        if (n.category && !n.categoryId) item.category = n.category;
+        migrateCategoryString(item);
+        item.images = item.images.map(img => ({
+          id: img.id || uid(),
+          name: img.name || 'Anhang',
+          type: img.type || 'image/jpeg',
+          dataUrl: img.dataUrl || img.data || '',
+          size: img.size || 0,
+          addedAt: img.addedAt || nowIso()
+        })).filter(img => img.dataUrl);
+        return item;
+      });
+
+      out.tasks = out.tasks.map(t => {
+        const item = {
+          id: t.id || uid(),
+          title: t.title || '',
+          details: t.details || t.text || t.notes || '',
+          dueDate: t.dueDate || t.date || '',
+          priority: ['low','normal','high'].includes(t.priority) ? t.priority : 'normal',
+          status: t.status === 'done' ? 'done' : 'open',
+          categoryId: t.categoryId || '',
+          subcategoryId: t.subcategoryId || '',
+          sourceNoteId: t.sourceNoteId || '',
+          images: Array.isArray(t.images) ? t.images : [],
+          createdAt: t.createdAt || nowIso(),
+          updatedAt: t.updatedAt || t.createdAt || nowIso(),
+          completedAt: t.completedAt || null
+        };
+        if (t.category && !t.categoryId) item.category = t.category;
+        migrateCategoryString(item);
+        item.images = item.images.map(img => ({
+          id: img.id || uid(),
+          name: img.name || 'Anhang',
+          type: img.type || 'image/jpeg',
+          dataUrl: img.dataUrl || img.data || '',
+          size: img.size || 0,
+          addedAt: img.addedAt || nowIso()
+        })).filter(img => img.dataUrl);
+        return item;
+      });
+
+      out.passwords = out.passwords.map(p => {
+        const item = {
+          id: p.id || uid(),
+          title: p.title || '',
+          url: p.url || '',
+          username: p.username || '',
+          categoryId: p.categoryId || '',
+          subcategoryId: p.subcategoryId || '',
+          password: p.password || '',
+          tags: p.tags || '',
+          notes: p.notes || '',
+          images: Array.isArray(p.images) ? p.images : [],
+          createdAt: p.createdAt || nowIso(),
+          updatedAt: p.updatedAt || p.createdAt || nowIso()
+        };
+        if (p.category && !p.categoryId) item.category = p.category;
+        migrateCategoryString(item);
+        item.images = item.images.map(img => ({
+          id: img.id || uid(),
+          name: img.name || 'Bild',
+          type: img.type || 'image/jpeg',
+          dataUrl: img.dataUrl || img.data || '',
+          size: img.size || 0,
+          addedAt: img.addedAt || nowIso()
+        })).filter(img => img.dataUrl && String(img.type || '').startsWith('image/'));
+        return item;
+      });
+
+
+      out.calendarEvents = out.calendarEvents.map(e => {
+        const item = {
+          id: e.id || uid(),
+          title: e.title || '',
+          date: e.date || dateKey(new Date()),
+          time: e.time || '',
+          categoryId: e.categoryId || '',
+          subcategoryId: e.subcategoryId || '',
+          notes: e.notes || e.text || '',
+          images: Array.isArray(e.images) ? e.images : [],
+          linkedTaskId: e.linkedTaskId || '',
+          createdAt: e.createdAt || nowIso(),
+          updatedAt: e.updatedAt || e.createdAt || nowIso()
+        };
+        if (e.category && !e.categoryId) item.category = e.category;
+        migrateCategoryString(item);
+        item.images = item.images.map(img => ({
+          id: img.id || uid(),
+          name: img.name || 'Anhang',
+          type: img.type || 'image/jpeg',
+          dataUrl: img.dataUrl || img.data || '',
+          size: img.size || 0,
+          addedAt: img.addedAt || nowIso()
+        })).filter(img => img.dataUrl);
+        return item;
+      });
+      return out;
+    }
+
+    function createDefaultCategories(target = vault) {
+      if (!Array.isArray(target.categories)) target.categories = [];
+      if (target.categories.length) return;
+      const allgemein = { id: uid(), name: 'Allgemein', parentId: null };
+      const arbeit = { id: uid(), name: 'Arbeit', parentId: null };
+      const privat = { id: uid(), name: 'Privat', parentId: null };
+      target.categories.push(allgemein, arbeit, privat);
+    }
+
+    function getOrCreateCategoryByName(name, parentId = null, target = vault) {
+      const clean = String(name || '').trim();
+      if (!clean) return { id: '', name: '', parentId: null };
+      const found = target.categories.find(c => c.parentId === parentId && c.name.toLowerCase() === clean.toLowerCase());
+      if (found) return found;
+      const cat = { id: uid(), name: clean, parentId };
+      target.categories.push(cat);
+      return cat;
+    }
+
+    function showApp() {
+      $('locked').style.display = 'none';
+      $('app').style.display = 'grid';
+      $('masterPassword').value = '';
+      $('masterConfirm').value = '';
+      clearNoteForm(true);
+      clearPasswordForm(true);
+      renderAll();
+    }
+
+    function lock() {
+      cryptoKey = null;
+      currentSalt = null;
+      currentIterations = ITERATIONS;
+      unlockedPassword = null;
+      vault = emptyVault();
+      noteDraftImages = [];
+      calendarCursor = new Date();
+      calendarDraftImages = [];
+      taskDraftImages = [];
+      selectedCalendarDate = dateKey(new Date());
+      $('app').style.display = 'none';
+      $('locked').style.display = 'grid';
+      if ($('calendarDate')) $('calendarDate').value = selectedCalendarDate;
+    initLockScreen();
+      toast('Tresor gesperrt.');
+    }
+
+    window.showSection = function(section) {
+      activeSection = section;
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      $(section).classList.add('active');
+      document.querySelectorAll('.nav button').forEach(b => b.classList.toggle('active', b.dataset.section === section));
+      const titles = {
+        dashboard: ['Übersicht', 'Überblick über alle gespeicherten Notizen, Aufgaben, Passwörter und Kalendereinträge.'],
+        notes: ['Notizen', 'Erstelle, sortiere und bebilderte Notizen.'],
+        tasks: ['Aufgaben', 'Verwalte Aufgaben, Fälligkeiten und Aufgaben aus Notizen.'],
+        passwords: ['Passwörter', 'Speichere Zugangsdaten lokal verschlüsselt und sortiert.'],
+        calendar: ['Kalender', 'Monatsansicht mit ISO-Kalenderwochen und Terminen.'],
+        categories: ['Kategorien', 'Lege Hauptkategorien und Unterkategorien an.'],
+        settings: ['Sicherung & Einstellungen', 'Backup, Import und Master-Passwort verwalten.']
+      };
+      $('pageTitle').textContent = titles[section][0];
+      $('pageSub').textContent = titles[section][1];
+      if (section === 'settings') ghLoadSettings();
+      renderAll();
+    }
+
+    function renderAll() {
+      if (!$('app') || $('app').style.display === 'none') return;
+      renderCategorySelects();
+      renderStats();
+      renderNotes();
+      renderTasks();
+      renderPasswords();
+      renderCalendar();
+      renderCategoryTree();
+      renderImagePreview();
+      renderCalendarAttachmentsPreview();
+      renderTaskAttachmentsPreview();
+      updateStorageInfo();
+    }
+
+    function rootCategories() {
+      return vault.categories.filter(c => !c.parentId).sort((a,b) => a.name.localeCompare(b.name, 'de'));
+    }
+
+    function subcategories(parentId) {
+      if (!parentId) return [];
+      return vault.categories.filter(c => c.parentId === parentId).sort((a,b) => a.name.localeCompare(b.name, 'de'));
+    }
+
+    function categoryById(id) { return vault.categories.find(c => c.id === id); }
+
+    function categoryPath(categoryId, subcategoryId) {
+      const cat = categoryById(categoryId);
+      const sub = categoryById(subcategoryId);
+      if (cat && sub) return cat.name + ' / ' + sub.name;
+      if (cat) return cat.name;
+      return 'Ohne Kategorie';
+    }
+
+    function setSelectOptions(selectId, selectedValue, opts, placeholder = 'Ohne Kategorie') {
+      const el = $(selectId);
+      const old = selectedValue ?? el.value;
+      el.innerHTML = `<option value="">${escapeHtml(placeholder)}</option>` + opts.map(o => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.name)}</option>`).join('');
+      el.value = opts.some(o => o.id === old) ? old : '';
+    }
+
+    function renderCategorySelects() {
+      const roots = rootCategories();
+      setSelectOptions('noteCategory', $('noteCategory').value, roots, 'Ohne Kategorie');
+      setSelectOptions('pwCategory', $('pwCategory').value, roots, 'Ohne Kategorie');
+      setSelectOptions('taskCategory', $('taskCategory').value, roots, 'Ohne Kategorie');
+      setSelectOptions('calendarCategory', $('calendarCategory').value, roots, 'Ohne Kategorie');
+      setSelectOptions('noteFilterCategory', $('noteFilterCategory').value, roots, 'Alle Kategorien');
+      setSelectOptions('passwordFilterCategory', $('passwordFilterCategory').value, roots, 'Alle Kategorien');
+      setSelectOptions('taskFilterCategory', $('taskFilterCategory').value, roots, 'Alle Kategorien');
+      setSelectOptions('calendarFilterCategory', $('calendarFilterCategory').value, roots, 'Alle Kategorien');
+      setSelectOptions('parentCategorySelect', $('parentCategorySelect').value, roots, 'Hauptkategorie wählen');
+
+      const noteSubs = subcategories($('noteCategory').value);
+      setSelectOptions('noteSubcategory', $('noteSubcategory').value, noteSubs, 'Ohne Unterkategorie');
+      $('noteSubcategory').disabled = !$('noteCategory').value || !noteSubs.length;
+
+      const pwSubs = subcategories($('pwCategory').value);
+      setSelectOptions('pwSubcategory', $('pwSubcategory').value, pwSubs, 'Ohne Unterkategorie');
+      $('pwSubcategory').disabled = !$('pwCategory').value || !pwSubs.length;
+
+      const taskSubs = subcategories($('taskCategory').value);
+      setSelectOptions('taskSubcategory', $('taskSubcategory').value, taskSubs, 'Ohne Unterkategorie');
+      $('taskSubcategory').disabled = !$('taskCategory').value || !taskSubs.length;
+
+      const calSubs = subcategories($('calendarCategory').value);
+      setSelectOptions('calendarSubcategory', $('calendarSubcategory').value, calSubs, 'Ohne Unterkategorie');
+      $('calendarSubcategory').disabled = !$('calendarCategory').value || !calSubs.length;
+
+      const noteFilterSubs = subcategories($('noteFilterCategory').value);
+      setSelectOptions('noteFilterSubcategory', $('noteFilterSubcategory').value, noteFilterSubs, 'Alle Unterkategorien');
+      $('noteFilterSubcategory').disabled = !$('noteFilterCategory').value || !noteFilterSubs.length;
+
+      const pwFilterSubs = subcategories($('passwordFilterCategory').value);
+      setSelectOptions('passwordFilterSubcategory', $('passwordFilterSubcategory').value, pwFilterSubs, 'Alle Unterkategorien');
+      $('passwordFilterSubcategory').disabled = !$('passwordFilterCategory').value || !pwFilterSubs.length;
+
+      const taskFilterSubs = subcategories($('taskFilterCategory').value);
+      setSelectOptions('taskFilterSubcategory', $('taskFilterSubcategory').value, taskFilterSubs, 'Alle Unterkategorien');
+      $('taskFilterSubcategory').disabled = !$('taskFilterCategory').value || !taskFilterSubs.length;
+
+      const calFilterSubs = subcategories($('calendarFilterCategory').value);
+      setSelectOptions('calendarFilterSubcategory', $('calendarFilterSubcategory').value, calFilterSubs, 'Alle Unterkategorien');
+      $('calendarFilterSubcategory').disabled = !$('calendarFilterCategory').value || !calFilterSubs.length;
+    }
+
+    function renderStats() {
+      $('statNotes').textContent = vault.notes.length;
+      $('statTasks').textContent = vault.tasks.length;
+      $('statPasswords').textContent = vault.passwords.length;
+      $('statEvents').textContent = vault.calendarEvents.length;
+      $('statCurrentWeek').textContent = 'KW ' + isoWeek(new Date()).week;
+      $('statCategories').textContent = vault.categories.length;
+      $('statImages').textContent = vault.notes.reduce((sum, n) => sum + (Array.isArray(n.images) ? n.images.length : 0), 0) + vault.passwords.reduce((sum, p) => sum + (Array.isArray(p.images) ? p.images.length : 0), 0) + vault.calendarEvents.reduce((sum, e) => sum + (Array.isArray(e.images) ? e.images.length : 0), 0) + vault.tasks.reduce((sum, t) => sum + (Array.isArray(t.images) ? t.images.length : 0), 0);
+      $('statUpdated').textContent = vault.updatedAt ? fmtDate(vault.updatedAt) : '-';
+    }
+
+    function renderNotes() {
+      const q = ($('noteSearch').value || '').toLowerCase();
+      const fCat = $('noteFilterCategory').value;
+      const fSub = $('noteFilterSubcategory').value;
+      const list = $('notesList');
+      const items = vault.notes
+        .slice()
+        .sort((a,b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
+        .filter(n => !fCat || n.categoryId === fCat)
+        .filter(n => !fSub || n.subcategoryId === fSub)
+        .filter(n => [n.title, n.text, categoryPath(n.categoryId, n.subcategoryId)].join(' ').toLowerCase().includes(q));
+      if (!items.length) {
+        list.innerHTML = '<div class="empty">Keine Notizen gefunden.</div>';
+        return;
+      }
+      list.innerHTML = items.map(n => `
+        <div class="item" data-id="${escapeHtml(n.id)}" onclick="selectNote('${escapeJs(n.id)}')">
+          <div class="item-title"><span>${escapeHtml(n.title || 'Ohne Titel')}</span></div>
+          <div class="item-meta">${escapeHtml((n.text || '').slice(0, 120))}${(n.text || '').length > 120 ? '…' : ''}</div>
+          <div class="pill-row">
+            <span class="pill">${escapeHtml(categoryPath(n.categoryId, n.subcategoryId))}</span>
+            ${(n.images && n.images.length) ? `<span class="pill green">${n.images.length} Anhang${n.images.length > 1 ? 'e' : ''}</span>` : ''}
+          </div>
+          <div class="item-meta" style="margin-top:8px;">Geändert: ${fmtDate(n.updatedAt)}</div>
+        </div>
+      `).join('');
+      markActiveItem('notesList', $('noteId').value);
+    }
+
+    window.selectNote = function(id) {
+      const n = vault.notes.find(x => x.id === id);
+      if (!n) return;
+      $('noteId').value = n.id;
+      $('noteTitle').value = n.title || '';
+      $('noteCategory').value = n.categoryId || '';
+      renderCategorySelects();
+      $('noteSubcategory').value = n.subcategoryId || '';
+      $('noteText').value = n.text || '';
+      noteDraftImages = Array.isArray(n.images) ? JSON.parse(JSON.stringify(n.images)) : [];
+      $('noteFormTitle').textContent = 'Notiz bearbeiten';
+      renderImagePreview();
+      markActiveItem('notesList', id);
+    }
+
+    async function saveNote(silent = false) {
+      const id = $('noteId').value || uid();
+      const title = $('noteTitle').value.trim();
+      const text = $('noteText').value.trim();
+      const categoryId = $('noteCategory').value;
+      const subcategoryId = categoryId ? $('noteSubcategory').value : '';
+      if (!title && !text && !noteDraftImages.length) { if (!silent) toast('Bitte Titel, Notiztext oder Anhang eingeben.'); return null; }
+      const existing = vault.notes.find(n => n.id === id);
+      const item = {
+        id,
+        title,
+        text,
+        categoryId,
+        subcategoryId,
+        images: noteDraftImages,
+        createdAt: existing?.createdAt || nowIso(),
+        updatedAt: nowIso()
+      };
+      if (existing) Object.assign(existing, item); else vault.notes.push(item);
+      $('noteId').value = id;
+      await encryptVault();
+      renderNotes();
+      if (!silent) toast('Notiz gespeichert.');
+      return item;
+    }
+
+    function clearNoteForm(clearId = true) {
+      if (clearId) $('noteId').value = '';
+      $('noteTitle').value = '';
+      $('noteCategory').value = '';
+      $('noteSubcategory').value = '';
+      $('noteText').value = '';
+      $('noteFormTitle').textContent = 'Neue Notiz';
+      noteDraftImages = [];
+      renderCategorySelects();
+      renderImagePreview();
+      markActiveItem('notesList', '');
+    }
+
+    async function deleteNote() {
+      const id = $('noteId').value;
+      if (!id) return toast('Keine Notiz ausgewählt.');
+      confirmModal('Notiz löschen?', 'Diese Notiz wird dauerhaft aus dem lokalen Tresor gelöscht. Bestehende Aufgaben aus dieser Notiz bleiben erhalten.', async () => {
+        vault.notes = vault.notes.filter(n => n.id !== id);
+        vault.tasks.forEach(t => { if (t.sourceNoteId === id) t.sourceNoteId = ''; });
+        clearNoteForm();
+        await encryptVault();
+        renderAll();
+        toast('Notiz gelöscht.');
+      });
+    }
+
+    function isTaskOverdue(task) {
+      return task.status !== 'done' && task.dueDate && task.dueDate < dateKey(new Date());
+    }
+
+    function taskStatusLabel(task) {
+      if (task.status === 'done') return 'Erledigt';
+      if (isTaskOverdue(task)) return 'Überfällig';
+      return 'Offen';
+    }
+
+    function taskPriorityLabel(value) {
+      return value === 'high' ? 'Hoch' : (value === 'low' ? 'Niedrig' : 'Normal');
+    }
+
+    function renderTasks() {
+      const q = ($('taskSearch').value || '').toLowerCase();
+      const fCat = $('taskFilterCategory').value;
+      const fSub = $('taskFilterSubcategory').value;
+      const fStatus = $('taskStatusFilter').value || 'all';
+      const list = $('tasksList');
+      const items = vault.tasks
+        .slice()
+        .sort((a,b) => {
+          const ad = a.dueDate || '9999-12-31';
+          const bd = b.dueDate || '9999-12-31';
+          if (a.status !== b.status) return a.status === 'done' ? 1 : -1;
+          return ad.localeCompare(bd) || (b.updatedAt || '').localeCompare(a.updatedAt || '');
+        })
+        .filter(t => !fCat || t.categoryId === fCat)
+        .filter(t => !fSub || t.subcategoryId === fSub)
+        .filter(t => {
+          if (fStatus === 'open') return t.status !== 'done';
+          if (fStatus === 'done') return t.status === 'done';
+          if (fStatus === 'overdue') return isTaskOverdue(t);
+          return true;
+        })
+        .filter(t => [t.title, t.details, t.dueDate, taskPriorityLabel(t.priority), taskStatusLabel(t), categoryPath(t.categoryId, t.subcategoryId)].join(' ').toLowerCase().includes(q));
+      if (!items.length) {
+        list.innerHTML = '<div class="empty">Keine Aufgaben gefunden.</div>';
+        return;
+      }
+      list.innerHTML = items.map(t => {
+        const overdue = isTaskOverdue(t);
+        const doneClass = t.status === 'done' ? ' task-done' : '';
+        const lateClass = overdue ? ' task-late' : '';
+        const source = t.sourceNoteId ? '<span class="pill green">aus Notiz</span>' : '';
+        const attachBadge = (t.images && t.images.length) ? `<span class="pill gray">📎 ${t.images.length}</span>` : '';
+        const due = t.dueDate ? `${formatDateOnly(t.dueDate)} · KW ${isoWeek(parseDateKey(t.dueDate)).week}` : 'Ohne Fälligkeitsdatum';
+        return `
+          <div class="item${lateClass}" data-id="${escapeHtml(t.id)}" onclick="selectTask('${escapeJs(t.id)}')">
+            <div class="item-title${doneClass}"><span>${escapeHtml(t.title || 'Ohne Titel')}</span><span class="pill ${overdue ? 'orange' : (t.status === 'done' ? 'green' : 'gray')}">${escapeHtml(taskStatusLabel(t))}</span></div>
+            <div class="item-meta${doneClass}">${escapeHtml((t.details || '').slice(0, 120))}${(t.details || '').length > 120 ? '…' : ''}</div>
+            <div class="pill-row">
+              <span class="pill">${escapeHtml(categoryPath(t.categoryId, t.subcategoryId))}</span>
+              <span class="pill gray">${escapeHtml(taskPriorityLabel(t.priority))}</span>
+              ${source}${attachBadge}
+            </div>
+            <div class="item-meta" style="margin-top:8px;">Fällig: ${escapeHtml(due)}</div>
+          </div>`;
+      }).join('');
+      markActiveItem('tasksList', $('taskId').value);
+    }
+
+    window.selectTask = function(id) {
+      const t = vault.tasks.find(x => x.id === id);
+      if (!t) return;
+      $('taskId').value = t.id;
+      $('taskTitle').value = t.title || '';
+      $('taskDueDate').value = t.dueDate || '';
+      $('taskPriority').value = t.priority || 'normal';
+      $('taskCategory').value = t.categoryId || '';
+      renderCategorySelects();
+      $('taskSubcategory').value = t.subcategoryId || '';
+      $('taskStatus').value = t.status || 'open';
+      $('toggleTaskDoneBtn').textContent = $('taskStatus').value === 'done' ? 'Wieder öffnen' : 'Erledigt markieren';
+      $('taskDetails').value = t.details || '';
+      $('taskSourceNoteId').value = t.sourceNoteId || '';
+      taskDraftImages = Array.isArray(t.images) ? JSON.parse(JSON.stringify(t.images)) : [];
+      $('taskFormTitle').textContent = 'Aufgabe bearbeiten';
+      updateTaskDueKw();
+      renderTaskSourceInfo();
+      renderTaskAttachmentsPreview();
+      markActiveItem('tasksList', id);
+    }
+
+    async function saveTask() {
+      const id = $('taskId').value || uid();
+      const title = $('taskTitle').value.trim();
+      const dueDate = $('taskDueDate').value;
+      const priority = $('taskPriority').value || 'normal';
+      const categoryId = $('taskCategory').value;
+      const subcategoryId = categoryId ? $('taskSubcategory').value : '';
+      const status = $('taskStatus').value === 'done' ? 'done' : 'open';
+      const details = $('taskDetails').value.trim();
+      const sourceNoteId = $('taskSourceNoteId').value || '';
+      if (!title && !details && !taskDraftImages.length) return toast('Bitte Titel, Details oder Anhang eingeben.');
+      const existing = vault.tasks.find(t => t.id === id);
+      const completedAt = status === 'done' ? (existing?.completedAt || nowIso()) : null;
+      const item = { id, title, details, dueDate, priority, status, categoryId, subcategoryId, sourceNoteId, images: taskDraftImages, createdAt: existing?.createdAt || nowIso(), updatedAt: nowIso(), completedAt };
+      if (existing) Object.assign(existing, item); else vault.tasks.push(item);
+      $('taskId').value = id;
+      await encryptVault();
+      renderAll();
+      selectTask(id);
+      toast('Aufgabe gespeichert.');
+    }
+
+    function clearTaskForm(clearId = true) {
+      if (clearId) $('taskId').value = '';
+      $('taskTitle').value = '';
+      $('taskDueDate').value = '';
+      $('taskPriority').value = 'normal';
+      $('taskCategory').value = '';
+      $('taskSubcategory').value = '';
+      $('taskStatus').value = 'open';
+      $('toggleTaskDoneBtn').textContent = 'Erledigt markieren';
+      $('taskDetails').value = '';
+      $('taskSourceNoteId').value = '';
+      taskDraftImages = [];
+      $('taskFormTitle').textContent = 'Neue Aufgabe';
+      renderCategorySelects();
+      updateTaskDueKw();
+      renderTaskSourceInfo();
+      renderTaskAttachmentsPreview();
+      markActiveItem('tasksList', '');
+    }
+
+    async function deleteTask() {
+      const id = $('taskId').value;
+      if (!id) return toast('Keine Aufgabe ausgewählt.');
+      confirmModal('Aufgabe löschen?', 'Diese Aufgabe wird dauerhaft aus dem lokalen Tresor gelöscht.', async () => {
+        vault.tasks = vault.tasks.filter(t => t.id !== id);
+        clearTaskForm(true);
+        await encryptVault();
+        renderAll();
+        toast('Aufgabe gelöscht.');
+      });
+    }
+
+    async function toggleTaskDone() {
+      const id = $('taskId').value;
+      if (!id) return toast('Keine Aufgabe ausgewählt.');
+      const task = vault.tasks.find(t => t.id === id);
+      if (!task) return;
+      task.status = task.status === 'done' ? 'open' : 'done';
+      task.completedAt = task.status === 'done' ? nowIso() : null;
+      task.updatedAt = nowIso();
+      await encryptVault();
+      renderAll();
+      selectTask(id);
+      toast(task.status === 'done' ? 'Aufgabe erledigt.' : 'Aufgabe wieder geöffnet.');
+    }
+
+    function updateTaskDueKw() {
+      if (!$('taskDueKw')) return;
+      const key = $('taskDueDate').value;
+      if (!key) { $('taskDueKw').textContent = 'Keine Fälligkeit gesetzt'; return; }
+      const info = isoWeek(parseDateKey(key));
+      $('taskDueKw').textContent = `Fällig in KW ${info.week}/${info.year}`;
+    }
+
+    function renderTaskSourceInfo() {
+      const box = $('taskSourceInfo');
+      if (!box) return;
+      const noteId = $('taskSourceNoteId').value;
+      const note = noteId ? vault.notes.find(n => n.id === noteId) : null;
+      if (!note) { box.style.display = 'none'; box.innerHTML = ''; return; }
+      box.style.display = 'block';
+      box.innerHTML = `Quelle: Notiz „<b>${escapeHtml(note.title || 'Ohne Titel')}</b>“<br />${escapeHtml((note.text || '').slice(0, 180))}${(note.text || '').length > 180 ? '…' : ''}`;
+    }
+
+    async function createTaskFromCurrentNote() {
+      const title = $('noteTitle').value.trim();
+      const text = $('noteText').value.trim();
+      const categoryId = $('noteCategory').value;
+      const subcategoryId = categoryId ? $('noteSubcategory').value : '';
+      if (!title && !text && !noteDraftImages.length) return toast('Bitte zuerst eine Notiz auswählen oder Text eingeben.');
+      let sourceNoteId = $('noteId').value;
+      if (!sourceNoteId) {
+        const saved = await saveNote(true);
+        sourceNoteId = saved?.id || $('noteId').value;
+      } else {
+        const existing = vault.notes.find(n => n.id === sourceNoteId);
+        if (existing) {
+          existing.title = title;
+          existing.text = text;
+          existing.categoryId = categoryId;
+          existing.subcategoryId = subcategoryId;
+          existing.images = noteDraftImages;
+          existing.updatedAt = nowIso();
+        }
+      }
+      const task = {
+        id: uid(),
+        title: title || 'Aufgabe aus Notiz',
+        details: text,
+        dueDate: '',
+        priority: 'normal',
+        status: 'open',
+        categoryId,
+        subcategoryId,
+        sourceNoteId,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+        completedAt: null
+      };
+      vault.tasks.push(task);
+      await encryptVault();
+      renderAll();
+      showSection('tasks');
+      selectTask(task.id);
+      toast('Aufgabe aus Notiz erstellt. Fälligkeitsdatum kannst du jetzt setzen.');
+    }
+
+    function renderPasswords() {
+      const q = ($('passwordSearch').value || '').toLowerCase();
+      const fCat = $('passwordFilterCategory').value;
+      const fSub = $('passwordFilterSubcategory').value;
+      const list = $('passwordsList');
+      const items = vault.passwords
+        .slice()
+        .sort((a,b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
+        .filter(p => !fCat || p.categoryId === fCat)
+        .filter(p => !fSub || p.subcategoryId === fSub)
+        .filter(p => [p.title, p.url, p.username, p.tags, p.notes, categoryPath(p.categoryId, p.subcategoryId)].join(' ').toLowerCase().includes(q));
+      if (!items.length) {
+        list.innerHTML = '<div class="empty">Keine Passwörter gefunden.</div>';
+        return;
+      }
+      list.innerHTML = items.map(p => `
+        <div class="item" data-id="${escapeHtml(p.id)}" onclick="selectPassword('${escapeJs(p.id)}')">
+          <div class="item-title"><span>${escapeHtml(p.title || 'Ohne Titel')}</span></div>
+          <div class="item-meta">${escapeHtml(p.username || '')}${p.url ? ' · ' + escapeHtml(p.url) : ''}</div>
+          <div class="pill-row">
+            <span class="pill">${escapeHtml(categoryPath(p.categoryId, p.subcategoryId))}</span>
+            ${p.tags ? `<span class="pill gray">${escapeHtml(p.tags)}</span>` : ''}
+            ${(p.images && p.images.length) ? `<span class="pill green">${p.images.length} Bild${p.images.length > 1 ? 'er' : ''}</span>` : ''}
+          </div>
+          <div class="item-meta" style="margin-top:8px;">Geändert: ${fmtDate(p.updatedAt)}</div>
+        </div>
+      `).join('');
+      markActiveItem('passwordsList', $('passwordId').value);
+    }
+
+    window.selectPassword = function(id) {
+      const p = vault.passwords.find(x => x.id === id);
+      if (!p) return;
+      $('passwordId').value = p.id;
+      $('pwTitle').value = p.title || '';
+      $('pwUrl').value = p.url || '';
+      $('pwUsername').value = p.username || '';
+      $('pwCategory').value = p.categoryId || '';
+      renderCategorySelects();
+      $('pwSubcategory').value = p.subcategoryId || '';
+      $('pwPassword').value = p.password || '';
+      $('pwTags').value = p.tags || '';
+      $('pwNotes').value = p.notes || '';
+      passwordDraftImages = Array.isArray(p.images) ? JSON.parse(JSON.stringify(p.images)) : [];
+      $('passwordFormTitle').textContent = 'Passwort bearbeiten';
+      renderPasswordAttachmentsPreview();
+      updateStrength('pwPassword', 'pwStrength', 'pwStrengthText');
+      markActiveItem('passwordsList', id);
+    }
+
+    async function savePassword() {
+      const id = $('passwordId').value || uid();
+      const title = $('pwTitle').value.trim();
+      const url = $('pwUrl').value.trim();
+      const username = $('pwUsername').value.trim();
+      const categoryId = $('pwCategory').value;
+      const subcategoryId = categoryId ? $('pwSubcategory').value : '';
+      const password = $('pwPassword').value;
+      const tags = $('pwTags').value.trim();
+      const notes = $('pwNotes').value.trim();
+      if (!title && !username && !url && !passwordDraftImages.length) return toast('Bitte Name, Benutzername, Webseite oder Bild eingeben.');
+      const existing = vault.passwords.find(p => p.id === id);
+      const item = { id, title, url, username, categoryId, subcategoryId, password, tags, notes, images: passwordDraftImages, createdAt: existing?.createdAt || nowIso(), updatedAt: nowIso() };
+      if (existing) Object.assign(existing, item); else vault.passwords.push(item);
+      $('passwordId').value = id;
+      await encryptVault();
+      toast('Passwort-Eintrag gespeichert.');
+    }
+
+    function clearPasswordForm(clearId = true) {
+      if (clearId) $('passwordId').value = '';
+      $('pwTitle').value = '';
+      $('pwUrl').value = '';
+      $('pwUsername').value = '';
+      $('pwCategory').value = '';
+      $('pwSubcategory').value = '';
+      $('pwPassword').value = '';
+      $('pwTags').value = '';
+      $('pwNotes').value = '';
+      passwordDraftImages = [];
+      $('passwordFormTitle').textContent = 'Neuer Passwort-Eintrag';
+      renderPasswordAttachmentsPreview();
+      updateStrength('pwPassword', 'pwStrength', 'pwStrengthText');
+      renderCategorySelects();
+      markActiveItem('passwordsList', '');
+    }
+
+    async function deletePassword() {
+      const id = $('passwordId').value;
+      if (!id) return toast('Kein Passwort-Eintrag ausgewählt.');
+      confirmModal('Passwort-Eintrag löschen?', 'Dieser Eintrag wird dauerhaft aus dem lokalen Tresor gelöscht.', async () => {
+        vault.passwords = vault.passwords.filter(p => p.id !== id);
+        clearPasswordForm();
+        await encryptVault();
+        toast('Passwort-Eintrag gelöscht.');
+      });
+    }
+
+    async function addCategory() {
+      const name = $('newCategoryName').value.trim();
+      if (!name) return toast('Bitte Namen der Kategorie eingeben.');
+      if (rootCategories().some(c => c.name.toLowerCase() === name.toLowerCase())) return toast('Diese Hauptkategorie existiert bereits.');
+      vault.categories.push({ id: uid(), name, parentId: null });
+      $('newCategoryName').value = '';
+      await encryptVault();
+      toast('Kategorie hinzugefügt.');
+    }
+
+    async function addSubcategory() {
+      const parentId = $('parentCategorySelect').value;
+      const name = $('newSubcategoryName').value.trim();
+      if (!parentId) return toast('Bitte Hauptkategorie wählen.');
+      if (!name) return toast('Bitte Namen der Unterkategorie eingeben.');
+      if (subcategories(parentId).some(c => c.name.toLowerCase() === name.toLowerCase())) return toast('Diese Unterkategorie existiert bereits.');
+      vault.categories.push({ id: uid(), name, parentId });
+      $('newSubcategoryName').value = '';
+      await encryptVault();
+      toast('Unterkategorie hinzugefügt.');
+    }
+
+    function renderCategoryTree() {
+      const root = rootCategories();
+      const box = $('categoryTree');
+      if (!root.length) {
+        box.innerHTML = '<div class="empty">Noch keine Kategorien vorhanden.</div>';
+        return;
+      }
+      box.innerHTML = root.map(cat => {
+        const subs = subcategories(cat.id);
+        return `
+          <div class="cat-box">
+            <div class="cat-header">
+              <span>${escapeHtml(cat.name)}</span>
+              <button class="btn danger small" onclick="deleteCategory('${escapeJs(cat.id)}')">Löschen</button>
+            </div>
+            <div class="sub-list">
+              ${subs.length ? subs.map(sub => `
+                <div class="sub-row">
+                  <span>↳ ${escapeHtml(sub.name)}</span>
+                  <button class="btn danger small" onclick="deleteCategory('${escapeJs(sub.id)}')">Löschen</button>
+                </div>
+              `).join('') : '<div class="hint">Noch keine Unterkategorien.</div>'}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    window.deleteCategory = function(id) {
+      const cat = categoryById(id);
+      if (!cat) return;
+      const isRoot = !cat.parentId;
+      const childIds = isRoot ? subcategories(id).map(c => c.id) : [];
+      const affectedIds = [id, ...childIds];
+      confirmModal('Kategorie löschen?', `„${cat.name}“ wird gelöscht. Zugeordnete Einträge bleiben erhalten, werden aber auf ohne Kategorie gesetzt.`, async () => {
+        vault.categories = vault.categories.filter(c => !affectedIds.includes(c.id));
+        vault.notes.forEach(n => {
+          if (affectedIds.includes(n.categoryId)) { n.categoryId = ''; n.subcategoryId = ''; }
+          if (affectedIds.includes(n.subcategoryId)) n.subcategoryId = '';
+        });
+        vault.passwords.forEach(p => {
+          if (affectedIds.includes(p.categoryId)) { p.categoryId = ''; p.subcategoryId = ''; }
+          if (affectedIds.includes(p.subcategoryId)) p.subcategoryId = '';
+        });
+        vault.tasks.forEach(t => {
+          if (affectedIds.includes(t.categoryId)) { t.categoryId = ''; t.subcategoryId = ''; }
+          if (affectedIds.includes(t.subcategoryId)) t.subcategoryId = '';
+        });
+        vault.calendarEvents.forEach(e => {
+          if (affectedIds.includes(e.categoryId)) { e.categoryId = ''; e.subcategoryId = ''; }
+          if (affectedIds.includes(e.subcategoryId)) e.subcategoryId = '';
+        });
+        await encryptVault();
+        toast('Kategorie gelöscht.');
+      });
+    }
+
+
+    function pad2(n) { return String(n).padStart(2, '0'); }
+
+    function dateKey(d) {
+      const x = new Date(d);
+      return `${x.getFullYear()}-${pad2(x.getMonth() + 1)}-${pad2(x.getDate())}`;
+    }
+
+    function parseDateKey(key) {
+      const [y, m, d] = String(key || '').split('-').map(Number);
+      return new Date(y || new Date().getFullYear(), (m || 1) - 1, d || 1);
+    }
+
+    function isoWeek(date) {
+      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      const week = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+      return { week, year: d.getUTCFullYear() };
+    }
+
+    function startOfWeekMonday(date) {
+      const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const day = d.getDay() || 7;
+      d.setDate(d.getDate() - day + 1);
+      return d;
+    }
+
+    function endOfWeekSunday(date) {
+      const d = startOfWeekMonday(date);
+      d.setDate(d.getDate() + 6);
+      return d;
+    }
+
+    function monthName(date) {
+      return date.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+    }
+
+    function weekdayShort(i) {
+      return ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'][i];
+    }
+
+    function formatDateOnly(key) {
+      try {
+        return parseDateKey(key).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+      } catch { return key || '-'; }
+    }
+
+    function filteredCalendarEvents() {
+      const q = ($('calendarSearch').value || '').toLowerCase();
+      const fCat = $('calendarFilterCategory').value;
+      const fSub = $('calendarFilterSubcategory').value;
+      return vault.calendarEvents
+        .slice()
+        .filter(e => !fCat || e.categoryId === fCat)
+        .filter(e => !fSub || e.subcategoryId === fSub)
+        .filter(e => [e.title, e.notes, e.date, e.time, categoryPath(e.categoryId, e.subcategoryId)].join(' ').toLowerCase().includes(q))
+        .sort((a,b) => (a.date + ' ' + (a.time || '')).localeCompare(b.date + ' ' + (b.time || '')));
+    }
+
+    function eventsForDate(key) {
+      return filteredCalendarEvents().filter(e => e.date === key).sort((a,b) => (a.time || '').localeCompare(b.time || ''));
+    }
+
+    function renderCalendar() {
+      if (!$('calendarGrid')) return;
+      const todayKey = dateKey(new Date());
+      const month = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth(), 1);
+      const start = startOfWeekMonday(month);
+      const endMonth = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + 1, 0);
+      const end = endOfWeekSunday(endMonth);
+      const selectedKw = isoWeek(parseDateKey(selectedCalendarDate || todayKey));
+      $('calendarTitle').textContent = monthName(month);
+      $('calendarWeekInfo').textContent = `Ausgewählt: ${formatDateOnly(selectedCalendarDate || todayKey)} · KW ${selectedKw.week}/${selectedKw.year}`;
+      const headers = ['KW', ...Array.from({length:7}, (_,i) => weekdayShort(i))]
+        .map(h => `<div class="cal-head">${h}</div>`).join('');
+      let cells = headers;
+      const d = new Date(start);
+      while (d <= end) {
+        const mondayKey = dateKey(d);
+        const kw = isoWeek(d);
+        cells += `<div class="cal-kw" title="Kalenderwoche ${kw.week}/${kw.year}" onclick="selectCalendarWeek('${escapeJs(mondayKey)}')">KW ${kw.week}</div>`;
+        for (let i=0; i<7; i++) {
+          const key = dateKey(d);
+          const evs = eventsForDate(key);
+          const classes = ['cal-day'];
+          if (d.getMonth() !== calendarCursor.getMonth()) classes.push('other-month');
+          if (key === todayKey) classes.push('today');
+          if (key === selectedCalendarDate) classes.push('selected');
+          const shown = evs.slice(0, 3).map(e => `<span class="cal-event-chip">${escapeHtml((e.time ? e.time + ' ' : '') + (e.title || 'Termin'))}</span>`).join('');
+          const more = evs.length > 3 ? `<div class="cal-more">+${evs.length - 3} weitere</div>` : '';
+          cells += `<div class="${classes.join(' ')}" onclick="selectCalendarDate('${escapeJs(key)}')">
+            <div class="cal-num"><span>${d.getDate()}</span>${evs.length ? `<span class="pill green">${evs.length}</span>` : ''}</div>
+            ${shown}${more}
+          </div>`;
+          d.setDate(d.getDate() + 1);
+        }
+      }
+      $('calendarGrid').innerHTML = cells;
+      renderAgenda();
+      updateCalendarDateKw();
+      markActiveItem('agendaList', $('calendarEventId').value);
+    }
+
+    function renderAgenda() {
+      const list = $('agendaList');
+      if (!list) return;
+      const items = filteredCalendarEvents();
+      if (!items.length) {
+        list.innerHTML = '<div class="empty">Keine Termine gefunden.</div>';
+        return;
+      }
+      let lastDate = '';
+      list.innerHTML = items.map(e => {
+        const dateHeader = e.date !== lastDate ? `<div class="agenda-date">${formatDateOnly(e.date)} · KW ${isoWeek(parseDateKey(e.date)).week}</div>` : '';
+        lastDate = e.date;
+        return `${dateHeader}
+          <div class="agenda-item" data-id="${escapeHtml(e.id)}" onclick="selectCalendarEvent('${escapeJs(e.id)}')">
+            <div class="item-title"><span>${escapeHtml(e.title || 'Ohne Titel')}</span>${e.time ? `<span class="pill gray">${escapeHtml(e.time)}</span>` : ''}</div>
+            <div class="item-meta">${escapeHtml((e.notes || '').slice(0, 100))}${(e.notes || '').length > 100 ? '…' : ''}</div>
+            <div class="pill-row">
+              <span class="pill">${escapeHtml(categoryPath(e.categoryId, e.subcategoryId))}</span>
+              ${e.linkedTaskId && vault.tasks.find(t => t.id === e.linkedTaskId) ? `<span class="pill green">✅ Aufgabe</span>` : ''}
+              ${(e.images && e.images.length) ? `<span class="pill gray">📎 ${e.images.length}</span>` : ''}
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    window.selectCalendarDate = function(key) {
+      selectedCalendarDate = key;
+      $('calendarDate').value = key;
+      const d = parseDateKey(key);
+      calendarCursor = new Date(d.getFullYear(), d.getMonth(), 1);
+      updateCalendarDateKw();
+      renderCalendar();
+    }
+
+    window.selectCalendarWeek = function(mondayKey) {
+      selectedCalendarDate = mondayKey;
+      $('calendarDate').value = mondayKey;
+      const d = parseDateKey(mondayKey);
+      calendarCursor = new Date(d.getFullYear(), d.getMonth(), 1);
+      updateCalendarDateKw();
+      renderCalendar();
+      toast(`Woche ausgewählt: KW ${isoWeek(d).week}`);
+    }
+
+    window.selectCalendarEvent = function(id) {
+      const e = vault.calendarEvents.find(x => x.id === id);
+      if (!e) return;
+      $('calendarEventId').value = e.id;
+      $('calendarTitleInput').value = e.title || '';
+      $('calendarDate').value = e.date || dateKey(new Date());
+      $('calendarTime').value = e.time || '';
+      $('calendarCategory').value = e.categoryId || '';
+      renderCategorySelects();
+      $('calendarSubcategory').value = e.subcategoryId || '';
+      $('calendarNotes').value = e.notes || '';
+      calendarDraftImages = Array.isArray(e.images) ? JSON.parse(JSON.stringify(e.images)) : [];
+      // Aufgaben-Verknüpfung anzeigen
+      const hasLinkedTask = !!e.linkedTaskId && vault.tasks.find(t => t.id === e.linkedTaskId);
+      $('calendarAsTask').checked = false;
+      $('calendarTaskOptions').style.display = 'none';
+      if (hasLinkedTask) {
+        const t = vault.tasks.find(t => t.id === e.linkedTaskId);
+        $('calendarTaskPriority').value = t.priority || 'normal';
+        $('calendarTaskStatus').value = t.status || 'open';
+      }
+      selectedCalendarDate = $('calendarDate').value;
+      const d = parseDateKey(selectedCalendarDate);
+      calendarCursor = new Date(d.getFullYear(), d.getMonth(), 1);
+      $('calendarFormTitle').textContent = 'Termin bearbeiten';
+      updateCalendarDateKw();
+      renderCalendarAttachmentsPreview();
+      renderCalendar();
+      markActiveItem('agendaList', id);
+    }
+
+    async function saveCalendarEvent() {
+      const id = $('calendarEventId').value || uid();
+      const title = $('calendarTitleInput').value.trim();
+      const date = $('calendarDate').value || dateKey(new Date());
+      const time = $('calendarTime').value;
+      const categoryId = $('calendarCategory').value;
+      const subcategoryId = categoryId ? $('calendarSubcategory').value : '';
+      const notes = $('calendarNotes').value.trim();
+      if (!title && !notes && !calendarDraftImages.length) return toast('Bitte Titel, Notiz oder Anhang eingeben.');
+      const existing = vault.calendarEvents.find(e => e.id === id);
+
+      // Aufgabe anlegen falls gewünscht
+      let linkedTaskId = existing?.linkedTaskId || '';
+      if ($('calendarAsTask').checked) {
+        const priority = $('calendarTaskPriority').value || 'normal';
+        const status = $('calendarTaskStatus').value || 'open';
+        if (linkedTaskId) {
+          // Bestehende Aufgabe aktualisieren
+          const existingTask = vault.tasks.find(t => t.id === linkedTaskId);
+          if (existingTask) {
+            existingTask.title = title || 'Aufgabe aus Kalender';
+            existingTask.dueDate = date;
+            existingTask.priority = priority;
+            existingTask.status = status;
+            existingTask.categoryId = categoryId;
+            existingTask.subcategoryId = subcategoryId;
+            existingTask.details = notes;
+            existingTask.updatedAt = nowIso();
+            existingTask.completedAt = status === 'done' ? (existingTask.completedAt || nowIso()) : null;
+          }
+        } else {
+          // Neue Aufgabe erstellen
+          const newTask = {
+            id: uid(), title: title || 'Aufgabe aus Kalender',
+            details: notes, dueDate: date, priority, status,
+            categoryId, subcategoryId,
+            sourceNoteId: '', createdAt: nowIso(), updatedAt: nowIso(),
+            completedAt: status === 'done' ? nowIso() : null
+          };
+          vault.tasks.push(newTask);
+          linkedTaskId = newTask.id;
+          toast('Termin gespeichert und Aufgabe angelegt.');
+        }
+        $('calendarAsTask').checked = false;
+        $('calendarTaskOptions').style.display = 'none';
+      }
+
+      const item = { id, title, date, time, categoryId, subcategoryId, notes, images: calendarDraftImages, linkedTaskId, createdAt: existing?.createdAt || nowIso(), updatedAt: nowIso() };
+      if (existing) Object.assign(existing, item); else vault.calendarEvents.push(item);
+      $('calendarEventId').value = id;
+      selectedCalendarDate = date;
+      const d = parseDateKey(date);
+      calendarCursor = new Date(d.getFullYear(), d.getMonth(), 1);
+      await encryptVault();
+      if (!$('calendarAsTask').checked) toast('Termin gespeichert.');
+    }
+
+    async function createTaskFromCalendarEvent() {
+      const title = $('calendarTitleInput').value.trim();
+      const date = $('calendarDate').value || dateKey(new Date());
+      const notes = $('calendarNotes').value.trim();
+      const categoryId = $('calendarCategory').value;
+      const subcategoryId = categoryId ? $('calendarSubcategory').value : '';
+      if (!title && !notes) return toast('Bitte zuerst Titel oder Notiz zum Termin eingeben.');
+      // Erst Termin speichern falls nötig
+      let eventId = $('calendarEventId').value;
+      if (!eventId) {
+        await saveCalendarEvent();
+        eventId = $('calendarEventId').value;
+      }
+      const task = {
+        id: uid(), title: title || 'Aufgabe aus Kalender',
+        details: notes, dueDate: date, priority: 'normal', status: 'open',
+        categoryId, subcategoryId, sourceNoteId: '',
+        createdAt: nowIso(), updatedAt: nowIso(), completedAt: null
+      };
+      vault.tasks.push(task);
+      // Verknüpfung im Event speichern
+      const ev = vault.calendarEvents.find(e => e.id === eventId);
+      if (ev) ev.linkedTaskId = task.id;
+      await encryptVault();
+      showSection('tasks');
+      selectTask(task.id);
+      toast('Aufgabe aus Termin erstellt.');
+    }
+
+    function clearCalendarForm(clearId = true) {
+      if (clearId) $('calendarEventId').value = '';
+      const key = selectedCalendarDate || dateKey(new Date());
+      $('calendarDate').value = key;
+      $('calendarTime').value = '';
+      $('calendarTitleInput').value = '';
+      $('calendarCategory').value = '';
+      $('calendarSubcategory').value = '';
+      $('calendarNotes').value = '';
+      $('calendarFormTitle').textContent = 'Neuer Termin';
+      calendarDraftImages = [];
+      $('calendarAsTask').checked = false;
+      $('calendarTaskOptions').style.display = 'none';
+      renderCalendarAttachmentsPreview();
+      renderCategorySelects();
+      updateCalendarDateKw();
+      markActiveItem('agendaList', '');
+    }
+
+    async function deleteCalendarEvent() {
+      const id = $('calendarEventId').value;
+      if (!id) return toast('Kein Termin ausgewählt.');
+      confirmModal('Termin löschen?', 'Dieser Termin wird dauerhaft aus dem lokalen Kalender gelöscht.', async () => {
+        vault.calendarEvents = vault.calendarEvents.filter(e => e.id !== id);
+        clearCalendarForm(true);
+        await encryptVault();
+        toast('Termin gelöscht.');
+      });
+    }
+
+    function updateCalendarDateKw() {
+      if (!$('calendarDateKw')) return;
+      const key = $('calendarDate').value || selectedCalendarDate || dateKey(new Date());
+      const info = isoWeek(parseDateKey(key));
+      $('calendarDateKw').textContent = `Kalenderwoche: KW ${info.week}/${info.year}`;
+    }
+
+    async function handleImageFiles(files) {
+      const arr = Array.from(files || []).filter(f => f.type.startsWith('image/') || f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
+      if (!arr.length) return toast('Bitte Bild- oder PDF-Dateien auswählen.');
+      toast('Anhänge werden verarbeitet...');
+      for (const file of arr) {
+        try {
+          const attachment = await fileToAttachmentEntry(file);
+          noteDraftImages.push(attachment);
+        } catch (err) {
+          console.error(err);
+          toast(err && err.message ? err.message : 'Ein Anhang konnte nicht verarbeitet werden.');
+        }
+      }
+      renderImagePreview();
+      const currentId = $('noteId').value;
+      if (currentId) await saveNote();
+      else toast('Anhänge hinzugefügt. Bitte Notiz speichern.');
+      $('noteImagesInput').value = '';
+    }
+
+    async function fileToAttachmentEntry(file) {
+      if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+        if (file.size > MAX_PDF_SIZE) throw new Error('PDF ist zu groß. Maximal ca. 12 MB pro PDF.');
+        const dataUrl = await readFileAsDataUrl(file);
+        return {
+          id: uid(),
+          name: file.name || 'Dokument.pdf',
+          type: 'application/pdf',
+          dataUrl,
+          size: file.size,
+          addedAt: nowIso()
+        };
+      }
+      if (!file.type.startsWith('image/')) throw new Error('Nur Bilder oder PDFs sind erlaubt.');
+      const dataUrl = await readFileAsDataUrl(file);
+      const compressed = await compressImage(dataUrl, file.type);
+      return {
+        id: uid(),
+        name: file.name,
+        type: compressed.type,
+        dataUrl: compressed.dataUrl,
+        size: Math.round((compressed.dataUrl.length * 3) / 4),
+        addedAt: nowIso()
+      };
+    }
+
+    function readFileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function loadImage(dataUrl) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = dataUrl;
+      });
+    }
+
+    async function compressImage(dataUrl, type) {
+      if (type === 'image/gif') return { dataUrl, type };
+      const img = await loadImage(dataUrl);
+      let { width, height } = img;
+      const factor = Math.min(1, MAX_IMAGE_SIDE / Math.max(width, height));
+      width = Math.round(width * factor);
+      height = Math.round(height * factor);
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      const outType = type === 'image/png' || type === 'image/webp' ? type : 'image/jpeg';
+      const out = canvas.toDataURL(outType, outType === 'image/jpeg' ? JPEG_QUALITY : undefined);
+      return { dataUrl: out, type: outType };
+    }
+
+    function renderImagePreview() {
+      const box = $('noteImagesPreview');
+      if (!box) return;
+      if (!noteDraftImages.length) {
+        box.innerHTML = '';
+        return;
+      }
+      box.innerHTML = noteDraftImages.map(file => {
+        const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+        const thumb = isPdf
+          ? `<div class="file-thumb">PDF</div>`
+          : `<img src="${escapeHtml(file.dataUrl)}" alt="${escapeHtml(file.name)}" />`;
+        return `
+          <div class="image-card">
+            ${thumb}
+            <div class="image-info">
+              <div class="image-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
+              <div class="hint">${isPdf ? 'PDF · ' : 'Bild · '}${formatBytes(file.size || 0)}</div>
+              <div class="image-actions">
+                <button class="btn secondary small" onclick="openAttachment('${escapeJs(file.id)}')">Öffnen</button>
+                <button class="btn ghost small" onclick="downloadAttachment('${escapeJs(file.id)}')">Download</button>
+                <button class="btn danger small" onclick="removeImageAttachment('${escapeJs(file.id)}')">X</button>
+              </div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    function dataUrlToBlob(dataUrl) {
+      const parts = dataUrl.split(',');
+      const mime = (parts[0].match(/:(.*?);/) || [])[1] || 'application/octet-stream';
+      const binary = atob(parts[1] || '');
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return new Blob([bytes], { type: mime });
+    }
+
+    function findAttachment(id) {
+      return noteDraftImages.find(x => x.id === id);
+    }
+
+    window.openAttachment = function(id) {
+      const file = findAttachment(id);
+      if (!file) return;
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+      if (isPdf) {
+        try {
+          const blob = dataUrlToBlob(file.dataUrl);
+          const url = URL.createObjectURL(blob);
+          const win = window.open(url, '_blank', 'noopener,noreferrer');
+          if (!win) downloadAttachment(id);
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch (err) {
+          downloadAttachment(id);
+        }
+        return;
+      }
+      const win = window.open('', '_blank', 'noopener,noreferrer');
+      if (!win) return toast('Popup wurde blockiert. Nutze Download.');
+      win.document.write(`<title>${escapeHtml(file.name)}</title><body style="margin:0;background:#111;display:grid;place-items:center;min-height:100vh;"><img src="${file.dataUrl}" style="max-width:100%;max-height:100vh;object-fit:contain;"></body>`);
+      win.document.close();
+    }
+
+    window.openImageAttachment = window.openAttachment;
+
+    window.downloadAttachment = function(id) {
+      const file = findAttachment(id);
+      if (!file) return;
+      const a = document.createElement('a');
+      a.href = file.dataUrl;
+      a.download = file.name || 'Anhang';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      toast('Download gestartet.');
+    }
+
+    window.removeImageAttachment = async function(id) {
+      noteDraftImages = noteDraftImages.filter(x => x.id !== id);
+      renderImagePreview();
+      if ($('noteId').value) await saveNote();
+      else toast('Anhang entfernt.');
+    }
+
+
+    async function handlePasswordAttachmentFiles(files) {
+      const list = Array.from(files || []);
+      if (!list.length) return;
+      for (const file of list) {
+        try {
+          if (!file.type.startsWith('image/')) throw new Error('Bei Passwörtern sind nur Bilddateien erlaubt.');
+          const dataUrl = await readFileAsDataUrl(file);
+          const compressed = await compressImage(dataUrl, file.type);
+          passwordDraftImages.push({
+            id: uid(),
+            name: file.name || 'Bild',
+            type: compressed.type,
+            dataUrl: compressed.dataUrl,
+            size: Math.round((compressed.dataUrl.length * 3) / 4),
+            addedAt: nowIso()
+          });
+        } catch (err) {
+          console.error(err);
+          toast(err.message || 'Bild konnte nicht verarbeitet werden.');
+        }
+      }
+      renderPasswordAttachmentsPreview();
+      const currentId = $('passwordId').value;
+      if (currentId) await savePassword();
+      else toast('Bild hinzugefügt. Bitte Passwort-Eintrag speichern.');
+      $('passwordAttachmentsInput').value = '';
+    }
+
+    function renderPasswordAttachmentsPreview() {
+      const box = $('passwordAttachmentsPreview');
+      if (!box) return;
+      if (!passwordDraftImages.length) {
+        box.innerHTML = '';
+        return;
+      }
+      box.innerHTML = passwordDraftImages.map(file => `
+          <div class="image-card">
+            <img src="${escapeHtml(file.dataUrl)}" alt="${escapeHtml(file.name)}" />
+            <div class="image-info">
+              <div class="image-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
+              <div class="hint">Bild · ${formatBytes(file.size || 0)}</div>
+              <div class="image-actions">
+                <button class="btn secondary small" onclick="openPasswordAttachment('${escapeJs(file.id)}')">Öffnen</button>
+                <button class="btn ghost small" onclick="downloadPasswordAttachment('${escapeJs(file.id)}')">Download</button>
+                <button class="btn danger small" onclick="removePasswordAttachment('${escapeJs(file.id)}')">X</button>
+              </div>
+            </div>
+          </div>`).join('');
+    }
+
+    function findPasswordAttachment(id) {
+      return passwordDraftImages.find(x => x.id === id);
+    }
+
+    window.openPasswordAttachment = function(id) {
+      const file = findPasswordAttachment(id);
+      if (!file) return;
+      const win = window.open('', '_blank', 'noopener,noreferrer');
+      if (!win) return toast('Popup wurde blockiert. Nutze Download.');
+      win.document.write(`<title>${escapeHtml(file.name)}</title><body style="margin:0;background:#111;display:grid;place-items:center;min-height:100vh;"><img src="${file.dataUrl}" style="max-width:100%;max-height:100vh;object-fit:contain;"></body>`);
+      win.document.close();
+    }
+
+    window.downloadPasswordAttachment = function(id) {
+      const file = findPasswordAttachment(id);
+      if (!file) return;
+      const a = document.createElement('a');
+      a.href = file.dataUrl;
+      a.download = file.name || 'Bild';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      toast('Download gestartet.');
+    }
+
+    window.removePasswordAttachment = async function(id) {
+      passwordDraftImages = passwordDraftImages.filter(x => x.id !== id);
+      renderPasswordAttachmentsPreview();
+      if ($('passwordId').value) await savePassword();
+      else toast('Bild entfernt.');
+    }
+
+    // ── KALENDER ANHÄNGE ──
+    async function handleCalendarAttachmentFiles(files) {
+      const arr = Array.from(files || []).filter(f => f.type.startsWith('image/') || f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
+      if (!arr.length) return toast('Bitte Bild- oder PDF-Dateien auswählen.');
+      toast('Anhänge werden verarbeitet...');
+      for (const file of arr) {
+        try {
+          const attachment = await fileToAttachmentEntry(file);
+          calendarDraftImages.push(attachment);
+        } catch (err) {
+          console.error(err);
+          toast(err && err.message ? err.message : 'Ein Anhang konnte nicht verarbeitet werden.');
+        }
+      }
+      renderCalendarAttachmentsPreview();
+      const currentId = $('calendarEventId').value;
+      if (currentId) await saveCalendarEvent();
+      else toast('Anhänge hinzugefügt. Bitte Termin speichern.');
+      $('calendarAttachmentsInput').value = '';
+    }
+
+    function renderCalendarAttachmentsPreview() {
+      const box = $('calendarAttachmentsPreview');
+      if (!box) return;
+      if (!calendarDraftImages.length) { box.innerHTML = ''; return; }
+      box.innerHTML = calendarDraftImages.map(file => {
+        const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+        const thumb = isPdf
+          ? `<div class="file-thumb">PDF</div>`
+          : `<img src="${escapeHtml(file.dataUrl)}" alt="${escapeHtml(file.name)}" />`;
+        return `
+          <div class="image-card">
+            ${thumb}
+            <div class="image-info">
+              <div class="image-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
+              <div class="hint">${isPdf ? 'PDF · ' : 'Bild · '}${formatBytes(file.size || 0)}</div>
+              <div class="image-actions">
+                <button class="btn secondary small" onclick="openCalendarAttachment('${escapeJs(file.id)}')">Öffnen</button>
+                <button class="btn ghost small" onclick="downloadCalendarAttachment('${escapeJs(file.id)}')">Download</button>
+                <button class="btn danger small" onclick="removeCalendarAttachment('${escapeJs(file.id)}')">✕</button>
+              </div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    window.openCalendarAttachment = function(id) {
+      const file = calendarDraftImages.find(x => x.id === id);
+      if (!file) return;
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+      if (isPdf) {
+        try {
+          const blob = dataUrlToBlob(file.dataUrl);
+          const url = URL.createObjectURL(blob);
+          const win = window.open(url, '_blank', 'noopener,noreferrer');
+          if (!win) downloadCalendarAttachment(id);
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch { downloadCalendarAttachment(id); }
+        return;
+      }
+      const win = window.open('', '_blank', 'noopener,noreferrer');
+      if (!win) return toast('Popup blockiert. Nutze Download.');
+      win.document.write(`<title>${escapeHtml(file.name)}</title><body style="margin:0;background:#111;display:grid;place-items:center;min-height:100vh;"><img src="${file.dataUrl}" style="max-width:100%;max-height:100vh;object-fit:contain;"></body>`);
+      win.document.close();
+    }
+
+    window.downloadCalendarAttachment = function(id) {
+      const file = calendarDraftImages.find(x => x.id === id);
+      if (!file) return;
+      const a = document.createElement('a');
+      a.href = file.dataUrl;
+      a.download = file.name || 'Anhang';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      toast('Download gestartet.');
+    }
+
+    window.removeCalendarAttachment = async function(id) {
+      calendarDraftImages = calendarDraftImages.filter(x => x.id !== id);
+      renderCalendarAttachmentsPreview();
+      if ($('calendarEventId').value) await saveCalendarEvent();
+      else toast('Anhang entfernt.');
+    }
+
+    // ── AUFGABEN ANHÄNGE ──
+    async function handleTaskAttachmentFiles(files) {
+      const arr = Array.from(files || []).filter(f => f.type.startsWith('image/') || f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
+      if (!arr.length) return toast('Bitte Bild- oder PDF-Dateien auswählen.');
+      toast('Anhänge werden verarbeitet...');
+      for (const file of arr) {
+        try {
+          const attachment = await fileToAttachmentEntry(file);
+          taskDraftImages.push(attachment);
+        } catch (err) {
+          console.error(err);
+          toast(err && err.message ? err.message : 'Ein Anhang konnte nicht verarbeitet werden.');
+        }
+      }
+      renderTaskAttachmentsPreview();
+      const currentId = $('taskId').value;
+      if (currentId) await saveTask();
+      else toast('Anhänge hinzugefügt. Bitte Aufgabe speichern.');
+      $('taskAttachmentsInput').value = '';
+    }
+
+    function renderTaskAttachmentsPreview() {
+      const box = $('taskAttachmentsPreview');
+      if (!box) return;
+      if (!taskDraftImages.length) { box.innerHTML = ''; return; }
+      box.innerHTML = taskDraftImages.map(file => {
+        const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+        const thumb = isPdf
+          ? `<div class="file-thumb">PDF</div>`
+          : `<img src="${escapeHtml(file.dataUrl)}" alt="${escapeHtml(file.name)}" />`;
+        return `
+          <div class="image-card">
+            ${thumb}
+            <div class="image-info">
+              <div class="image-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
+              <div class="hint">${isPdf ? 'PDF · ' : 'Bild · '}${formatBytes(file.size || 0)}</div>
+              <div class="image-actions">
+                <button class="btn secondary small" onclick="openTaskAttachment('${escapeJs(file.id)}')">Öffnen</button>
+                <button class="btn ghost small" onclick="downloadTaskAttachment('${escapeJs(file.id)}')">Download</button>
+                <button class="btn danger small" onclick="removeTaskAttachment('${escapeJs(file.id)}')">✕</button>
+              </div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    window.openTaskAttachment = function(id) {
+      const file = taskDraftImages.find(x => x.id === id);
+      if (!file) return;
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+      if (isPdf) {
+        try {
+          const blob = dataUrlToBlob(file.dataUrl);
+          const url = URL.createObjectURL(blob);
+          const win = window.open(url, '_blank', 'noopener,noreferrer');
+          if (!win) downloadTaskAttachment(id);
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch { downloadTaskAttachment(id); }
+        return;
+      }
+      const win = window.open('', '_blank', 'noopener,noreferrer');
+      if (!win) return toast('Popup blockiert. Nutze Download.');
+      win.document.write(`<title>${escapeHtml(file.name)}</title><body style="margin:0;background:#111;display:grid;place-items:center;min-height:100vh;"><img src="${file.dataUrl}" style="max-width:100%;max-height:100vh;object-fit:contain;"></body>`);
+      win.document.close();
+    }
+
+    window.downloadTaskAttachment = function(id) {
+      const file = taskDraftImages.find(x => x.id === id);
+      if (!file) return;
+      const a = document.createElement('a');
+      a.href = file.dataUrl;
+      a.download = file.name || 'Anhang';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      toast('Download gestartet.');
+    }
+
+    window.removeTaskAttachment = async function(id) {
+      taskDraftImages = taskDraftImages.filter(x => x.id !== id);
+      renderTaskAttachmentsPreview();
+      if ($('taskId').value) await saveTask();
+      else toast('Anhang entfernt.');
+    }
+
+    function generatePassword() {
+      const length = Math.max(8, Math.min(64, parseInt($('genLength').value || '18', 10)));
+      const mode = $('genMode').value;
+      const sets = {
+        all: 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*?-_=+',
+        easy: 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789',
+        pin: '0123456789'
+      };
+      const chars = sets[mode] || sets.all;
+      const bytes = crypto.getRandomValues(new Uint32Array(length));
+      let out = '';
+      for (let i = 0; i < length; i++) out += chars[bytes[i] % chars.length];
+      $('pwPassword').value = out;
+      updateStrength('pwPassword', 'pwStrength', 'pwStrengthText');
+      copyText(out);
+      toast('Passwort generiert und kopiert.');
+    }
+
+    function scorePassword(pw) {
+      let score = 0;
+      if (!pw) return 0;
+      score += Math.min(40, pw.length * 2.5);
+      if (/[a-z]/.test(pw)) score += 10;
+      if (/[A-Z]/.test(pw)) score += 10;
+      if (/\d/.test(pw)) score += 15;
+      if (/[^A-Za-z0-9]/.test(pw)) score += 20;
+      if (pw.length >= 16) score += 10;
+      return Math.min(100, score);
+    }
+
+    function updateStrength(inputId, barId, textId) {
+      const pw = $(inputId).value || '';
+      const score = scorePassword(pw);
+      const bar = $(barId);
+      const text = $(textId);
+      if (!bar || !text) return;
+      bar.style.width = score + '%';
+      if (score < 35) { bar.style.background = '#dc2626'; text.textContent = 'Schwach'; }
+      else if (score < 70) { bar.style.background = '#d97706'; text.textContent = 'Mittel'; }
+      else { bar.style.background = '#059669'; text.textContent = 'Stark'; }
+    }
+
+    function copyText(text) {
+      if (!text) return toast('Nichts zum Kopieren vorhanden.');
+      navigator.clipboard?.writeText(text).then(() => toast('Kopiert.')).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        toast('Kopiert.');
+      });
+    }
+
+    function openUrl() {
+      let url = $('pwUrl').value.trim();
+      if (!url) return toast('Keine Webseite eingetragen.');
+      if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+
+    function exportVault() {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return toast('Kein Tresor vorhanden.');
+      const blob = new Blob([raw], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `notizen_passwort_backup_rev05_${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast('Verschlüsseltes Backup exportiert.');
+    }
+
+    async function importVault(file) {
+      if (!file) return;
+      const text = await file.text();
+      try {
+        const payload = JSON.parse(text);
+        if (!payload.salt || !payload.iv || !payload.ciphertext) throw new Error('Ungültiges Backup.');
+        confirmModal('Backup importieren?', 'Der aktuelle lokale Tresor wird überschrieben. Nach dem Import musst du mit dem Master-Passwort des Backups entsperren.', () => {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+          lock();
+          toast('Backup importiert. Bitte mit dem Backup-Master-Passwort öffnen.');
+        });
+      } catch (err) {
+        toast('Die Datei ist kein gültiges Backup.');
+      }
+    }
+
+    async function changeMasterPassword() {
+      const p1 = $('newMaster1').value;
+      const p2 = $('newMaster2').value;
+      if (!p1 || p1.length < 8) return toast('Neues Master-Passwort muss mindestens 8 Zeichen haben.');
+      if (p1 !== p2) return toast('Die neuen Master-Passwörter stimmen nicht überein.');
+      currentSalt = crypto.getRandomValues(new Uint8Array(16));
+      currentIterations = ITERATIONS;
+      cryptoKey = await deriveKey(p1, currentSalt, currentIterations);
+      unlockedPassword = p1;
+      await encryptVault();
+      $('newMaster1').value = '';
+      $('newMaster2').value = '';
+      toast('Master-Passwort geändert. Bitte neues Backup exportieren.');
+    }
+
+    function wipeAll() {
+      confirmModal('Alles löschen?', 'Alle lokalen Daten dieses Tools werden gelöscht. Ein vorhandenes externes Backup bleibt natürlich erhalten.', () => {
+        localStorage.removeItem(STORAGE_KEY);
+        lock();
+        toast('Alle lokalen Daten wurden gelöscht.');
+      });
+    }
+
+    function updateStorageInfo() {
+      const raw = localStorage.getItem(STORAGE_KEY) || '';
+      const bytes = new Blob([raw]).size;
+      const pct = Math.min(100, Math.round(bytes / SOFT_STORAGE_LIMIT_BYTES * 100));
+      $('storageFill').style.width = pct + '%';
+      $('storageText').textContent = `${formatBytes(bytes)} gespeichert. Empfehlung: unter ${formatBytes(SOFT_STORAGE_LIMIT_BYTES)} bleiben.`;
+      $('storageFill').style.background = pct > 85 ? '#dc2626' : (pct > 65 ? '#d97706' : '#2563eb');
+    }
+
+    function formatBytes(bytes) {
+      if (!bytes) return '0 KB';
+      const units = ['B', 'KB', 'MB', 'GB'];
+      let n = bytes;
+      let i = 0;
+      while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+      return `${n.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+    }
+
+    function markActiveItem(listId, id) {
+      const list = $(listId);
+      if (!list) return;
+      list.querySelectorAll('.item').forEach(i => i.classList.toggle('active', i.dataset.id === id));
+    }
+
+    function confirmModal(title, text, onOk) {
+      $('modalTitle').textContent = title;
+      $('modalText').textContent = text;
+      $('modalBackdrop').classList.add('show');
+      const ok = $('modalOk');
+      const cancel = $('modalCancel');
+      const clean = () => {
+        $('modalBackdrop').classList.remove('show');
+        ok.onclick = null;
+        cancel.onclick = null;
+      };
+      ok.onclick = async () => { clean(); await onOk(); };
+      cancel.onclick = clean;
+    }
+
+    function toast(msg) {
+      const el = $('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+    }
+
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+    }
+
+    function escapeJs(s) {
+      return String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '');
+    }
+
+    // ── GITHUB SYNC ──
+    const GH_TOKEN_KEY = 'gh_sync_token';
+    const GH_REPO_KEY = 'gh_sync_repo';
+    const GH_VAULT_FILE = 'vault.enc';
+
+    function ghLoadSettings() {
+      const token = localStorage.getItem(GH_TOKEN_KEY) || '';
+      const repo = localStorage.getItem(GH_REPO_KEY) || '';
+      if ($('ghToken')) $('ghToken').value = token;
+      if ($('ghRepo')) $('ghRepo').value = repo;
+    }
+
+    function ghSaveSettings() {
+      const token = ($('ghToken').value || '').trim();
+      const repo = ($('ghRepo').value || '').trim();
+      if (!token || !repo) return toast('Bitte Token und Repository eingeben.');
+      localStorage.setItem(GH_TOKEN_KEY, token);
+      localStorage.setItem(GH_REPO_KEY, repo);
+      toast('GitHub-Einstellungen gespeichert ✓');
+      ghSetStatus('Einstellungen gespeichert. Du kannst jetzt hoch- und herunterladen.', 'ok');
+    }
+
+    function ghSetStatus(msg, type) {
+      const el = $('ghStatus');
+      if (!el) return;
+      el.style.display = 'block';
+      el.textContent = msg;
+      el.style.background = type === 'ok' ? '#ecfdf5' : type === 'err' ? '#fef2f2' : '#fffbeb';
+      el.style.borderColor = type === 'ok' ? '#059669' : type === 'err' ? '#dc2626' : '#d97706';
+      el.style.color = type === 'ok' ? '#065f46' : type === 'err' ? '#991b1b' : '#92400e';
+    }
+
+    async function ghGetFileSha(token, repo) {
+      try {
+        const res = await fetch(`https://api.github.com/repos/${repo}/contents/${GH_VAULT_FILE}`, {
+          headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' }
+        });
+        if (res.status === 404) return null;
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data.sha || null;
+      } catch { return null; }
+    }
+
+    async function ghUpload() {
+      const token = localStorage.getItem(GH_TOKEN_KEY);
+      const repo = localStorage.getItem(GH_REPO_KEY);
+      if (!token || !repo) return toast('Bitte erst GitHub-Einstellungen speichern.');
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return toast('Kein Tresor vorhanden.');
+      ghSetStatus('⏳ Hochladen...', 'info');
+      try {
+        const sha = await ghGetFileSha(token, repo);
+        const content = btoa(unescape(encodeURIComponent(raw)));
+        const body = { message: 'Tresor sync ' + new Date().toISOString(), content };
+        if (sha) body.sha = sha;
+        const res = await fetch(`https://api.github.com/repos/${repo}/contents/${GH_VAULT_FILE}`, {
+          method: 'PUT',
+          headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.message || res.status);
+        }
+        ghSetStatus('✅ Erfolgreich hochgeladen: ' + new Date().toLocaleString('de-DE'), 'ok');
+        toast('Tresor zu GitHub hochgeladen ✓');
+      } catch (err) {
+        ghSetStatus('❌ Fehler beim Hochladen: ' + err.message, 'err');
+        toast('Fehler beim Hochladen.');
+      }
+    }
+
+    async function ghDownload() {
+      const token = localStorage.getItem(GH_TOKEN_KEY);
+      const repo = localStorage.getItem(GH_REPO_KEY);
+      if (!token || !repo) return toast('Bitte erst GitHub-Einstellungen speichern.');
+      ghSetStatus('⏳ Herunterladen...', 'info');
+      try {
+        const res = await fetch(`https://api.github.com/repos/${repo}/contents/${GH_VAULT_FILE}`, {
+          headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' }
+        });
+        if (res.status === 404) {
+          ghSetStatus('ℹ️ Noch keine Sync-Datei vorhanden. Bitte zuerst auf einem Gerät hochladen.', 'info');
+          return;
+        }
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const raw = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
+        const payload = JSON.parse(raw);
+        if (!payload.salt || !payload.iv || !payload.ciphertext) throw new Error('Ungültige Sync-Datei.');
+        confirmModal('Tresor herunterladen?', 'Der lokale Tresor wird durch die Sync-Version ersetzt. Danach mit deinem Master-Passwort öffnen.', () => {
+          localStorage.setItem(STORAGE_KEY, raw);
+          lock();
+          ghSetStatus('✅ Heruntergeladen: ' + new Date().toLocaleString('de-DE'), 'ok');
+          toast('Sync-Tresor geladen. Bitte entsperren.');
+        });
+      } catch (err) {
+        ghSetStatus('❌ Fehler beim Herunterladen: ' + err.message, 'err');
+        toast('Fehler beim Herunterladen.');
+      }
+    }
+
+    // Auto-Upload nach jedem Speichern
+    const _origEncryptVault = encryptVault;
+    encryptVault = async function() {
+      await _origEncryptVault.apply(this, arguments);
+      const token = localStorage.getItem(GH_TOKEN_KEY);
+      const repo = localStorage.getItem(GH_REPO_KEY);
+      if (token && repo) {
+        ghUpload().catch(() => {});
+      }
+    };
+
+    document.querySelectorAll('.nav button').forEach(btn => btn.addEventListener('click', () => showSection(btn.dataset.section)));
+    $('unlockBtn').addEventListener('click', openVault);
+    $('masterPassword').addEventListener('keydown', e => { if (e.key === 'Enter') openVault(); });
+    $('masterConfirm').addEventListener('keydown', e => { if (e.key === 'Enter') openVault(); });
+    $('masterPassword').addEventListener('input', () => updateStrength('masterPassword', 'masterStrength', 'masterStrengthText'));
+
+    $('lockBtn').addEventListener('click', lock);
+    $('exportBtn').addEventListener('click', exportVault);
+    $('exportBtnTop').addEventListener('click', exportVault);
+    $('importFile').addEventListener('change', e => importVault(e.target.files[0]));
+    $('changeMasterBtn').addEventListener('click', changeMasterPassword);
+    $('wipeBtn').addEventListener('click', wipeAll);
+    $('ghSaveSettingsBtn').addEventListener('click', ghSaveSettings);
+    $('ghUploadBtn').addEventListener('click', ghUpload);
+    $('ghDownloadBtn').addEventListener('click', ghDownload);
+
+    $('newNoteBtn').addEventListener('click', () => clearNoteForm(true));
+    $('saveNoteBtn').addEventListener('click', () => saveNote(false));
+    $('noteToTaskBtn').addEventListener('click', createTaskFromCurrentNote);
+    $('clearNoteBtn').addEventListener('click', () => clearNoteForm(true));
+    $('deleteNoteBtn').addEventListener('click', deleteNote);
+    $('noteSearch').addEventListener('input', renderNotes);
+    $('noteFilterCategory').addEventListener('change', () => { $('noteFilterSubcategory').value = ''; renderCategorySelects(); renderNotes(); });
+    $('noteFilterSubcategory').addEventListener('change', renderNotes);
+    $('noteCategory').addEventListener('change', () => { $('noteSubcategory').value = ''; renderCategorySelects(); });
+    $('noteSubcategory').addEventListener('change', () => {});
+
+    $('imageDrop').addEventListener('click', () => $('noteImagesInput').click());
+    $('noteImagesInput').addEventListener('change', e => handleImageFiles(e.target.files));
+    ['dragenter','dragover'].forEach(ev => $('imageDrop').addEventListener(ev, e => { e.preventDefault(); $('imageDrop').classList.add('drag'); }));
+    ['dragleave','drop'].forEach(ev => $('imageDrop').addEventListener(ev, e => { e.preventDefault(); $('imageDrop').classList.remove('drag'); }));
+    $('imageDrop').addEventListener('drop', e => handleImageFiles(e.dataTransfer.files));
+
+    $('newPasswordBtn').addEventListener('click', () => clearPasswordForm(true));
+    $('savePasswordBtn').addEventListener('click', savePassword);
+    $('clearPasswordBtn').addEventListener('click', () => clearPasswordForm(true));
+    $('deletePasswordBtn').addEventListener('click', deletePassword);
+    $('passwordSearch').addEventListener('input', renderPasswords);
+    $('passwordFilterCategory').addEventListener('change', () => { $('passwordFilterSubcategory').value = ''; renderCategorySelects(); renderPasswords(); });
+    $('passwordFilterSubcategory').addEventListener('change', renderPasswords);
+    $('pwCategory').addEventListener('change', () => { $('pwSubcategory').value = ''; renderCategorySelects(); });
+
+    $('passwordAttachmentDrop').addEventListener('click', () => $('passwordAttachmentsInput').click());
+    $('passwordAttachmentsInput').addEventListener('change', e => handlePasswordAttachmentFiles(e.target.files));
+    ['dragenter','dragover'].forEach(ev => $('passwordAttachmentDrop').addEventListener(ev, e => { e.preventDefault(); $('passwordAttachmentDrop').classList.add('drag'); }));
+    ['dragleave','drop'].forEach(ev => $('passwordAttachmentDrop').addEventListener(ev, e => { e.preventDefault(); $('passwordAttachmentDrop').classList.remove('drag'); }));
+    $('passwordAttachmentDrop').addEventListener('drop', e => handlePasswordAttachmentFiles(e.dataTransfer.files));
+
+    $('newTaskBtn').addEventListener('click', () => clearTaskForm(true));
+    $('saveTaskBtn').addEventListener('click', saveTask);
+    $('toggleTaskDoneBtn').addEventListener('click', toggleTaskDone);
+    $('clearTaskBtn').addEventListener('click', () => clearTaskForm(true));
+    $('deleteTaskBtn').addEventListener('click', deleteTask);
+    $('taskSearch').addEventListener('input', renderTasks);
+    $('taskStatusFilter').addEventListener('change', renderTasks);
+    $('taskFilterCategory').addEventListener('change', () => { $('taskFilterSubcategory').value = ''; renderCategorySelects(); renderTasks(); });
+    $('taskFilterSubcategory').addEventListener('change', renderTasks);
+    $('taskCategory').addEventListener('change', () => { $('taskSubcategory').value = ''; renderCategorySelects(); });
+    $('taskDueDate').addEventListener('change', updateTaskDueKw);
+    $('taskStatus').addEventListener('change', () => { $('toggleTaskDoneBtn').textContent = $('taskStatus').value === 'done' ? 'Wieder öffnen' : 'Erledigt markieren'; });
+
+    // Aufgaben Anhänge
+    $('taskAttachmentDrop').addEventListener('click', () => $('taskAttachmentsInput').click());
+    $('taskAttachmentsInput').addEventListener('change', e => handleTaskAttachmentFiles(e.target.files));
+    ['dragenter','dragover'].forEach(ev => $('taskAttachmentDrop').addEventListener(ev, e => { e.preventDefault(); $('taskAttachmentDrop').classList.add('drag'); }));
+    ['dragleave','drop'].forEach(ev => $('taskAttachmentDrop').addEventListener(ev, e => { e.preventDefault(); $('taskAttachmentDrop').classList.remove('drag'); }));
+    $('taskAttachmentDrop').addEventListener('drop', e => handleTaskAttachmentFiles(e.dataTransfer.files));
+
+    $('newCalendarEventBtn').addEventListener('click', () => clearCalendarForm(true));
+    $('saveCalendarEventBtn').addEventListener('click', saveCalendarEvent);
+    $('calendarEventToTaskBtn').addEventListener('click', createTaskFromCalendarEvent);
+    $('clearCalendarEventBtn').addEventListener('click', () => clearCalendarForm(true));
+    $('deleteCalendarEventBtn').addEventListener('click', deleteCalendarEvent);
+    $('calendarSearch').addEventListener('input', renderCalendar);
+    $('calendarFilterCategory').addEventListener('change', () => { $('calendarFilterSubcategory').value = ''; renderCategorySelects(); renderCalendar(); });
+    $('calendarFilterSubcategory').addEventListener('change', renderCalendar);
+    $('calendarCategory').addEventListener('change', () => { $('calendarSubcategory').value = ''; renderCategorySelects(); });
+    $('calendarDate').addEventListener('change', () => {
+      selectedCalendarDate = $('calendarDate').value || dateKey(new Date());
+      const d = parseDateKey(selectedCalendarDate);
+      calendarCursor = new Date(d.getFullYear(), d.getMonth(), 1);
+      updateCalendarDateKw();
+      renderCalendar();
+    });
+    $('prevMonthBtn').addEventListener('click', () => { calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() - 1, 1); renderCalendar(); });
+    $('nextMonthBtn').addEventListener('click', () => { calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + 1, 1); renderCalendar(); });
+    $('todayBtn').addEventListener('click', () => { selectedCalendarDate = dateKey(new Date()); calendarCursor = new Date(); $('calendarDate').value = selectedCalendarDate; renderCalendar(); });
+
+    // Kalender „Als Aufgabe" Checkbox
+    $('calendarAsTask').addEventListener('change', () => {
+      $('calendarTaskOptions').style.display = $('calendarAsTask').checked ? 'block' : 'none';
+    });
+
+    // Kalender Anhänge
+    $('calendarAttachmentDrop').addEventListener('click', () => $('calendarAttachmentsInput').click());
+    $('calendarAttachmentsInput').addEventListener('change', e => handleCalendarAttachmentFiles(e.target.files));
+    ['dragenter','dragover'].forEach(ev => $('calendarAttachmentDrop').addEventListener(ev, e => { e.preventDefault(); $('calendarAttachmentDrop').classList.add('drag'); }));
+    ['dragleave','drop'].forEach(ev => $('calendarAttachmentDrop').addEventListener(ev, e => { e.preventDefault(); $('calendarAttachmentDrop').classList.remove('drag'); }));
+    $('calendarAttachmentDrop').addEventListener('drop', e => handleCalendarAttachmentFiles(e.dataTransfer.files));
+
+    $('togglePwBtn').addEventListener('click', () => {
+      const inp = $('pwPassword');
+      inp.type = inp.type === 'password' ? 'text' : 'password';
+      $('togglePwBtn').textContent = inp.type === 'password' ? 'Anzeigen' : 'Verbergen';
+    });
+    $('copyPwBtn').addEventListener('click', () => copyText($('pwPassword').value));
+    $('generatePwBtn').addEventListener('click', generatePassword);
+    $('pwPassword').addEventListener('input', () => updateStrength('pwPassword', 'pwStrength', 'pwStrengthText'));
+    $('openUrlBtn').addEventListener('click', openUrl);
+
+    $('addCategoryBtn').addEventListener('click', addCategory);
+    $('addSubcategoryBtn').addEventListener('click', addSubcategory);
+    $('newCategoryName').addEventListener('keydown', e => { if (e.key === 'Enter') addCategory(); });
+    $('newSubcategoryName').addEventListener('keydown', e => { if (e.key === 'Enter') addSubcategory(); });
+
+    if ($('calendarDate')) $('calendarDate').value = selectedCalendarDate;
+    initLockScreen();
+  </script>
+
+  <!-- PWA Install Banner -->
+  <div id="installBanner">
+    <img id="installIcon" class="ib-icon" alt="App Icon" />
+    <div class="ib-text">
+      <strong>Als App installieren</strong>
+      <span>Offline verfügbar · Kein App Store · Startet wie eine native App</span>
+    </div>
+    <div class="ib-actions">
+      <button id="installDismiss">Später</button>
+      <button id="installNow">Installieren</button>
+    </div>
+  </div>
+
+  <script>
+    // Icon für Banner setzen (wird nach PWA-Bootstrap verfügbar)
+    window.addEventListener('DOMContentLoaded', () => {
+      const appleIcon = document.getElementById('appleIcon');
+      const bannerIcon = document.getElementById('installIcon');
+      if (appleIcon && bannerIcon) bannerIcon.src = appleIcon.href;
+    });
+
+    document.getElementById('installNow').addEventListener('click', async () => {
+      const prompt = window._pwaInstallPrompt;
+      if (!prompt) return;
+      prompt.prompt();
+      const { outcome } = await prompt.userChoice;
+      if (outcome === 'accepted') {
+        document.getElementById('installBanner').style.display = 'none';
+        window._pwaInstallPrompt = null;
+      }
+    });
+
+    document.getElementById('installDismiss').addEventListener('click', () => {
+      document.getElementById('installBanner').style.display = 'none';
+      // 3 Tage nicht mehr zeigen
+      localStorage.setItem('pwa_dismissed', Date.now());
+    });
+
+    // Nicht zeigen wenn kürzlich weggeklickt
+    const dismissed = parseInt(localStorage.getItem('pwa_dismissed') || '0');
+    if (Date.now() - dismissed < 3 * 24 * 60 * 60 * 1000) {
+      window.addEventListener('beforeinstallprompt', e => e.preventDefault(), { once: true });
+    }
+
+    // iOS Safari: manuellen Hinweis zeigen (kein beforeinstallprompt)
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+    if (isIos && !isStandalone) {
+      setTimeout(() => {
+        const banner = document.getElementById('installBanner');
+        const text = banner.querySelector('.ib-text span');
+        const btn = document.getElementById('installNow');
+        if (text) text.textContent = 'Tippe auf Teilen → "Zum Home-Bildschirm" um die App zu installieren.';
+        if (btn) btn.style.display = 'none';
+        banner.style.display = 'flex';
+      }, 3000);
+    }
+  </script>
+</body>
+</html>
