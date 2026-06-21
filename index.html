@@ -1770,6 +1770,28 @@ self.addEventListener('fetch', e => {
       <section id="settings" class="section">
         <div class="grid">
           <div class="card">
+            <h3 style="margin-top:0;">☁️ GitHub Sync</h3>
+            <p class="muted">Synchronisiere deine verschlüsselten Daten automatisch zwischen PC und Handy über GitHub. Die Daten bleiben verschlüsselt – GitHub sieht nur unlesbaren Code.</p>
+            <div class="field">
+              <label for="ghToken">GitHub Personal Access Token</label>
+              <input id="ghToken" type="password" placeholder="ghp_..." autocomplete="off" />
+              <div class="hint">Einmalig eingeben – wird nur lokal gespeichert. Nie an andere weitergeben!</div>
+            </div>
+            <div class="field">
+              <label for="ghRepo">Repository (Benutzer/Repo)</label>
+              <input id="ghRepo" placeholder="z. B. 23041986/mein-tresor" autocomplete="off" />
+            </div>
+            <div class="actions" style="justify-content:flex-start; margin-bottom:8px; flex-wrap:wrap;">
+              <button id="ghSaveSettingsBtn" class="btn ok">Einstellungen speichern</button>
+              <button id="ghUploadBtn" class="btn">⬆ Jetzt hochladen</button>
+              <button id="ghDownloadBtn" class="btn secondary">⬇ Jetzt herunterladen</button>
+            </div>
+            <div id="ghStatus" class="notice" style="display:none;"></div>
+            <div class="notice" style="margin-top:10px;">
+              <b>So funktioniert es:</b> Nach dem Speichern werden Daten bei jeder Änderung automatisch zu GitHub hochgeladen. Beim Öffnen auf einem anderen Gerät einfach „Jetzt herunterladen" klicken.
+            </div>
+          </div>
+          <div class="card">
             <h3 style="margin-top:0;">Backup</h3>
             <p class="muted">Exportiere deine verschlüsselten Daten als JSON-Datei. Bilder und PDFs sind im Backup enthalten.</p>
             <div class="actions" style="justify-content:flex-start; margin-bottom:14px;">
@@ -2155,6 +2177,7 @@ self.addEventListener('fetch', e => {
       };
       $('pageTitle').textContent = titles[section][0];
       $('pageSub').textContent = titles[section][1];
+      if (section === 'settings') ghLoadSettings();
       renderAll();
     }
 
@@ -3635,6 +3658,120 @@ self.addEventListener('fetch', e => {
       return String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '');
     }
 
+    // ── GITHUB SYNC ──
+    const GH_TOKEN_KEY = 'gh_sync_token';
+    const GH_REPO_KEY = 'gh_sync_repo';
+    const GH_VAULT_FILE = 'vault.enc';
+
+    function ghLoadSettings() {
+      const token = localStorage.getItem(GH_TOKEN_KEY) || '';
+      const repo = localStorage.getItem(GH_REPO_KEY) || '';
+      if ($('ghToken')) $('ghToken').value = token;
+      if ($('ghRepo')) $('ghRepo').value = repo;
+    }
+
+    function ghSaveSettings() {
+      const token = ($('ghToken').value || '').trim();
+      const repo = ($('ghRepo').value || '').trim();
+      if (!token || !repo) return toast('Bitte Token und Repository eingeben.');
+      localStorage.setItem(GH_TOKEN_KEY, token);
+      localStorage.setItem(GH_REPO_KEY, repo);
+      toast('GitHub-Einstellungen gespeichert ✓');
+      ghSetStatus('Einstellungen gespeichert. Du kannst jetzt hoch- und herunterladen.', 'ok');
+    }
+
+    function ghSetStatus(msg, type) {
+      const el = $('ghStatus');
+      if (!el) return;
+      el.style.display = 'block';
+      el.textContent = msg;
+      el.style.background = type === 'ok' ? '#ecfdf5' : type === 'err' ? '#fef2f2' : '#fffbeb';
+      el.style.borderColor = type === 'ok' ? '#059669' : type === 'err' ? '#dc2626' : '#d97706';
+      el.style.color = type === 'ok' ? '#065f46' : type === 'err' ? '#991b1b' : '#92400e';
+    }
+
+    async function ghGetFileSha(token, repo) {
+      try {
+        const res = await fetch(`https://api.github.com/repos/${repo}/contents/${GH_VAULT_FILE}`, {
+          headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' }
+        });
+        if (res.status === 404) return null;
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data.sha || null;
+      } catch { return null; }
+    }
+
+    async function ghUpload() {
+      const token = localStorage.getItem(GH_TOKEN_KEY);
+      const repo = localStorage.getItem(GH_REPO_KEY);
+      if (!token || !repo) return toast('Bitte erst GitHub-Einstellungen speichern.');
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return toast('Kein Tresor vorhanden.');
+      ghSetStatus('⏳ Hochladen...', 'info');
+      try {
+        const sha = await ghGetFileSha(token, repo);
+        const content = btoa(unescape(encodeURIComponent(raw)));
+        const body = { message: 'Tresor sync ' + new Date().toISOString(), content };
+        if (sha) body.sha = sha;
+        const res = await fetch(`https://api.github.com/repos/${repo}/contents/${GH_VAULT_FILE}`, {
+          method: 'PUT',
+          headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.message || res.status);
+        }
+        ghSetStatus('✅ Erfolgreich hochgeladen: ' + new Date().toLocaleString('de-DE'), 'ok');
+        toast('Tresor zu GitHub hochgeladen ✓');
+      } catch (err) {
+        ghSetStatus('❌ Fehler beim Hochladen: ' + err.message, 'err');
+        toast('Fehler beim Hochladen.');
+      }
+    }
+
+    async function ghDownload() {
+      const token = localStorage.getItem(GH_TOKEN_KEY);
+      const repo = localStorage.getItem(GH_REPO_KEY);
+      if (!token || !repo) return toast('Bitte erst GitHub-Einstellungen speichern.');
+      ghSetStatus('⏳ Herunterladen...', 'info');
+      try {
+        const res = await fetch(`https://api.github.com/repos/${repo}/contents/${GH_VAULT_FILE}`, {
+          headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' }
+        });
+        if (res.status === 404) {
+          ghSetStatus('ℹ️ Noch keine Sync-Datei vorhanden. Bitte zuerst auf einem Gerät hochladen.', 'info');
+          return;
+        }
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const raw = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
+        const payload = JSON.parse(raw);
+        if (!payload.salt || !payload.iv || !payload.ciphertext) throw new Error('Ungültige Sync-Datei.');
+        confirmModal('Tresor herunterladen?', 'Der lokale Tresor wird durch die Sync-Version ersetzt. Danach mit deinem Master-Passwort öffnen.', () => {
+          localStorage.setItem(STORAGE_KEY, raw);
+          lock();
+          ghSetStatus('✅ Heruntergeladen: ' + new Date().toLocaleString('de-DE'), 'ok');
+          toast('Sync-Tresor geladen. Bitte entsperren.');
+        });
+      } catch (err) {
+        ghSetStatus('❌ Fehler beim Herunterladen: ' + err.message, 'err');
+        toast('Fehler beim Herunterladen.');
+      }
+    }
+
+    // Auto-Upload nach jedem Speichern
+    const _origEncryptVault = encryptVault;
+    encryptVault = async function() {
+      await _origEncryptVault.apply(this, arguments);
+      const token = localStorage.getItem(GH_TOKEN_KEY);
+      const repo = localStorage.getItem(GH_REPO_KEY);
+      if (token && repo) {
+        ghUpload().catch(() => {});
+      }
+    };
+
     document.querySelectorAll('.nav button').forEach(btn => btn.addEventListener('click', () => showSection(btn.dataset.section)));
     $('unlockBtn').addEventListener('click', openVault);
     $('masterPassword').addEventListener('keydown', e => { if (e.key === 'Enter') openVault(); });
@@ -3647,6 +3784,9 @@ self.addEventListener('fetch', e => {
     $('importFile').addEventListener('change', e => importVault(e.target.files[0]));
     $('changeMasterBtn').addEventListener('click', changeMasterPassword);
     $('wipeBtn').addEventListener('click', wipeAll);
+    $('ghSaveSettingsBtn').addEventListener('click', ghSaveSettings);
+    $('ghUploadBtn').addEventListener('click', ghUpload);
+    $('ghDownloadBtn').addEventListener('click', ghDownload);
 
     $('newNoteBtn').addEventListener('click', () => clearNoteForm(true));
     $('saveNoteBtn').addEventListener('click', () => saveNote(false));
